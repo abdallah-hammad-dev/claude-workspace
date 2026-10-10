@@ -1,0 +1,9 @@
+{
+  "id": "claude-bridge",
+  "name": "Claude Bridge",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "VS Code–style live context for Claude Code: active file, selection, open tabs, and live Excalidraw read/edit tools over a local MCP server.",
+  "author": "Abdallah Hammad",
+  "isDesktopOnly": true
+}
