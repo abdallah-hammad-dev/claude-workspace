@@ -26,6 +26,8 @@ export interface PluginData {
   /** Override for the Claude Code executable; "" = auto-detect. */
   claudePath: string;
   chat: ChatPrefs;
+  /** The chat panel is opened automatically once, so new users find it. */
+  chatShownOnce: boolean;
 }
 
 export const DEFAULT_DATA: PluginData = {
@@ -34,6 +36,7 @@ export const DEFAULT_DATA: PluginData = {
   server: { port: null, token: "" },
   claudePath: "",
   chat: { model: "", permissionMode: "default" },
+  chatShownOnce: false,
 };
 
 export function mergeData(saved: unknown): PluginData {

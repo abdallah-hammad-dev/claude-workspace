@@ -111,6 +111,18 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
 
   plugin.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, chatHost));
   plugin.addRibbonIcon("bot", "Open Claude chat", () => void openChat(plugin, false));
+  // Status bar button: easier to find than the ribbon icon.
+  const status = plugin.addStatusBarItem();
+  status.addClass("mod-clickable", "cw-statusbar");
+  status.setText("✳ Claude");
+  status.setAttr("aria-label", "Open Claude chat");
+  status.onClickEvent(() => void openChat(plugin, false));
+  // First run: open the chat panel once so it's obvious where it lives.
+  app.workspace.onLayoutReady(() => {
+    if (plugin.data.chatShownOnce || app.workspace.getLeavesOfType(CHAT_VIEW_TYPE).length) return;
+    plugin.data.chatShownOnce = true;
+    void plugin.persist().then(() => openChat(plugin, false));
+  });
   plugin.addCommand({ id: "open-chat", name: "Open chat", callback: () => void openChat(plugin, false) });
   plugin.addCommand({ id: "new-chat-tab", name: "New chat in a tab", callback: () => void openChat(plugin, true) });
   plugin.addCommand({ id: "install-claude-config", name: "Install Claude Code config in this vault", callback: () => void install() });
