@@ -75,3 +75,6 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   `headerEl`, `icon`, `navigation`, `scope`, `modalEl`, `inputEl`…). With ES2022 define-semantics they reset the
   base value to undefined after `super()`; `ChatView.titleEl` did exactly that and Obsidian's header update threw
   before `onOpen` ran (blank panel, no error in our log). tsconfig now has `useDefineForClassFields: false` too.
+- Electron realm: the SDK calls `events.setMaxListeners(n, abortSignal)` with a browser AbortSignal → Node throws
+  "eventTargets … Received an instance of AbortSignal". `src/desktop/electron-compat.ts` patches it (applied in
+  `startDesktop`). Patch the **default** import of `node:events` — `import * as` gives esbuild's read-only interop copy.

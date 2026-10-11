@@ -8,6 +8,7 @@ import { createLogger, setLogSink } from "../core/logger";
 import type ClaudeWorkspacePlugin from "../main";
 import { CHAT_VIEW_TYPE, ChatView, type ChatHost } from "./chat/ChatView";
 import { enhancedPath, locateClaude } from "./claude-binary";
+import { patchSetMaxListenersForElectron } from "./electron-compat";
 import { defaultPortFor, generateToken } from "./http-guard";
 import { Installer } from "./Installer";
 import { mcpAddCommand, type InstallTarget } from "./installer-merge";
@@ -33,6 +34,7 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
     }
   };
   setLogSink(writeLog);
+  const unpatchEvents = patchSetMaxListenersForElectron();
   writeLog("info", `plugin ${plugin.manifest.version} starting on ${process.platform}`);
   // Uncaught errors coming from our code (stack frames are tagged plugin:claude-workspace).
   plugin.registerDomEvent(window, "error", (e: ErrorEvent) => {
@@ -256,6 +258,7 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
     host,
     dispose: async () => {
       setLogSink(null);
+      unpatchEvents();
       await host.stop();
     },
   };
