@@ -31,6 +31,8 @@ const SCENARIOS = [
   ["chat-plan", 420, 860],
   ["chat-question", 420, 960],
   ["chat-slash", 420, 860],
+  ["chat-effort-args", 420, 860],
+  ["chat-advisor-args", 420, 860],
   ["chat-mention", 420, 860],
   ["chat-mode-menu", 420, 860],
   ["chat-effort-menu", 420, 860],

@@ -23,6 +23,50 @@ export function slashQuery(value: string, cursor: number): string | null {
   return m ? m[1]! : null;
 }
 
+/** The first argument of a slash command being typed at the cursor (`/effort hi|`), or null. */
+export function argQuery(value: string, cursor: number): { command: string; query: string; start: number } | null {
+  const m = /^\/(\S+) +(\S*)$/.exec(value.slice(0, cursor));
+  return m ? { command: m[1]!, query: m[2]!, start: cursor - m[2]!.length } : null;
+}
+
+/**
+ * Literal values of a command's first argument, read from Claude Code's `argumentHint`:
+ * `<low|medium|high>` → low, medium, high; `[auto|<tokens>]` → auto; `consent | revoke` → consent, revoke.
+ * Placeholders (`<model>`, `[name]`, `key=value`) give null: only `|` alternatives are values.
+ */
+export function argChoices(hint: string | undefined): string[] | null {
+  const h = (hint ?? "").trim().replace(/\s*\|\s*/g, "|");
+  let group = "";
+  let depth = 0;
+  for (const ch of h) {
+    if (/\s/.test(ch) && depth === 0) break;
+    if (ch === "[" || ch === "<" || ch === "(") depth++;
+    if (ch === "]" || ch === ">" || ch === ")") depth--;
+    group += ch;
+  }
+  if (/^[[<(]/.test(group) && /[\]>)]$/.test(group)) group = group.slice(1, -1);
+  const alternatives: string[] = [];
+  let current = "";
+  depth = 0;
+  for (const ch of group) {
+    if (ch === "|" && depth === 0) {
+      alternatives.push(current);
+      current = "";
+      continue;
+    }
+    if (ch === "[" || ch === "<" || ch === "(") depth++;
+    if (ch === "]" || ch === ">" || ch === ")") depth--;
+    current += ch;
+  }
+  alternatives.push(current);
+  if (alternatives.length < 2) return null;
+  const values = alternatives.map((a) => a.trim().split(/\s/)[0]!).filter((a) => /^[\w-]+$/.test(a));
+  return values.length ? [...new Set(values)] : null;
+}
+
+/** Built-ins that only make sense in a terminal (prompt-bar color, focus view, process internals). */
+const TERMINAL_ONLY = new Set(["color", "focus", "heapdump", "workflow-launch-exec"]);
+
 /** The @mention being typed at the cursor, or null. */
 export function mentionQuery(value: string, cursor: number): { query: string; start: number } | null {
   const before = value.slice(0, cursor);
@@ -38,6 +82,7 @@ export function filterCommands(commands: CommandLike[], query: string, limit = 5
   const q = query.toLowerCase();
   const seen = new Set<string>();
   const unique = [...commands]
+    .filter((c) => !c.builtin || !(TERMINAL_ONLY.has(c.name) || c.name.startsWith("__")))
     .sort((a, b) => Number(!!b.builtin) - Number(!!a.builtin))
     .filter((c) => (seen.has(c.name) ? false : (seen.add(c.name), true)));
   const names = (c: CommandLike) => [c.name, ...(c.aliases ?? [])].map((n) => n.toLowerCase());
@@ -94,10 +139,10 @@ export class InlineSuggest {
     return this.onPick !== null;
   }
 
-  show(items: SuggestItem[], onPick: (item: SuggestItem) => void, emptyText = "No matches"): void {
+  show(items: SuggestItem[], onPick: (item: SuggestItem) => void, emptyText = "No matches", selected = 0): void {
     this.items = items;
     this.onPick = onPick;
-    this.selected = 0;
+    this.selected = Math.max(0, Math.min(selected, items.length - 1));
     this.render(emptyText);
     this.el.show();
   }

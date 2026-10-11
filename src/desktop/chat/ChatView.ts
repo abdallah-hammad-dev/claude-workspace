@@ -20,7 +20,7 @@ import { ChatSession } from "./ChatSession";
 import { EFFORTS, parseLocalCommand } from "./local-commands";
 import { SessionPickerModal, sessionTitle } from "./modals";
 import { PromptDock } from "./PromptDock";
-import { filterCommands, filterFiles, InlineSuggest, mentionQuery, slashQuery } from "./suggest";
+import { argChoices, argQuery, filterCommands, filterFiles, InlineSuggest, mentionQuery, slashQuery, type SuggestItem } from "./suggest";
 import { Transcript, type UserBubble } from "./Transcript";
 
 export const CHAT_VIEW_TYPE = "claude-workspace-chat";
@@ -723,6 +723,21 @@ export class ChatView extends ItemView {
       return;
     }
 
+    const arg = argQuery(value, cursor);
+    if (arg && !this.dock.pending) {
+      const choices = this.argItems(arg.command, arg.query);
+      if (choices) {
+        const pick = (item: SuggestItem) => {
+          // Effort and model are pickers: choosing applies at once. Other commands may take more arguments.
+          if (arg.command !== "effort" && arg.command !== "model") return this.replaceRange(arg.start, cursor, item.insert);
+          this.input.value = `/${arg.command} ${item.title}`;
+          this.submit();
+        };
+        this.suggest.show(choices.items, pick, "", choices.selected);
+        return;
+      }
+    }
+
     const mention = mentionQuery(value, cursor);
     if (mention) {
       const recent = this.app.workspace.getLastOpenFiles();
@@ -741,6 +756,32 @@ export class ChatView extends ItemView {
       return;
     }
     this.suggest.hide();
+  }
+
+  /**
+   * Values for a slash command's first argument. Effort and model come from this view (with the
+   * current one marked); other commands from the `a|b|c` alternatives in Claude Code's argument hint.
+   */
+  private argItems(command: string, query: string): { items: SuggestItem[]; selected: number } | null {
+    const prefs = this.host.prefs();
+    let choices: { value: string; description?: string }[];
+    let current: string | undefined;
+    if (command === "effort") {
+      choices = [...this.effortLevels().map((e) => ({ value: e.value, description: e.desc })), { value: "auto", description: "The model's usual level" }];
+      current = prefs.effort || "auto";
+    } else if (command === "model") {
+      choices = this.models.map((m) => ({ value: m.value || "default", description: m.desc || m.label }));
+      current = prefs.model || "default";
+    } else {
+      const cmd = this.commands?.find((c) => c.name === command && c.builtin) ?? this.commands?.find((c) => c.name === command || c.aliases?.includes(command));
+      choices = (argChoices(cmd?.argumentHint) ?? []).map((value) => ({ value }));
+    }
+    const q = query.toLowerCase();
+    const matches = choices.filter((c) => c.value.toLowerCase().startsWith(q));
+    // Fully typed: let Enter send instead of picking.
+    if (!matches.length || matches.some((c) => c.value.toLowerCase() === q)) return null;
+    const items = matches.map((c) => ({ insert: `${c.value} `, title: c.value, hint: c.value === current ? "current" : undefined, description: c.description }));
+    return { items, selected: Math.max(0, matches.findIndex((c) => c.value === current)) };
   }
 
   private replaceRange(from: number, to: number, text: string): void {

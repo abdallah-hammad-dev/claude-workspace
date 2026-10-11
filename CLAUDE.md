@@ -80,6 +80,11 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   input focus or on `/`). `/clear`, `/effort` and `/model` are handled by the view (`local-commands.ts`):
   their terminal versions are interactive pickers that only print "Usage" over the SDK, so the view opens
   its own picker or applies the argument. Everything else passes through.
+- **Slash command arguments**: after `/cmd `, the popup offers the first argument's values. Effort/model come
+  from the view (picking applies at once); every other command's values come from the `a|b|c` alternatives in
+  its documented `argumentHint` (`argChoices`). Never parse command *output* ("Usage: …") — not a stable format.
+  Terminal-only built-ins (`color`, `focus`, `heapdump`, `__*`) are hidden from the popup (`TERMINAL_ONLY`).
+  Claude Code itself omits TUI-only commands (`/permissions`, `/resume`, `/login`…) from the SDK list.
 - **Effort** is a chat pref ("" = Claude Code's default): `effort` query option at start, then
   `applyFlagSettings({ effortLevel })` mid-session (verified by e2e via `CLAUDE_EFFORT` in Bash). The button
   hides for models with `supportsEffort: false`.

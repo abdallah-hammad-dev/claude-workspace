@@ -9,6 +9,8 @@ export const FAKE_COMMANDS = [
   { name: "init", description: "Initialize a new CLAUDE.md file with codebase documentation", argumentHint: "", builtin: true },
   { name: "model", description: "Set the AI model for Claude Code", argumentHint: "<model>", builtin: true },
   { name: "effort", description: "Set effort level for model usage", argumentHint: "<low|medium|high|xhigh|max|auto>", builtin: true },
+  { name: "advisor", description: "Let Claude consult a stronger model at key moments", argumentHint: "[fable|opus|sonnet|off]", builtin: true },
+  { name: "color", description: "Set the prompt bar color for this session", argumentHint: "[red|blue|green]", builtin: true },
 ];
 
 export const FAKE_MODELS = [

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { parseLocalCommand } from "../src/desktop/chat/local-commands";
 import { relativeTime } from "../src/desktop/chat/modals";
-import { filterCommands, filterFiles, mentionQuery, slashQuery } from "../src/desktop/chat/suggest";
+import { argChoices, argQuery, filterCommands, filterFiles, mentionQuery, slashQuery } from "../src/desktop/chat/suggest";
 import { describeSuggestions, permissionAsk, relPath } from "../src/desktop/chat/tool-render";
 
 const VAULT = "C:\\Users\\me\\vault";
@@ -42,6 +42,32 @@ describe("parseLocalCommand", () => {
   });
 });
 
+describe("slash command arguments", () => {
+  it("detects the first argument under the cursor", () => {
+    expect(argQuery("/effort ", 8)).toEqual({ command: "effort", query: "", start: 8 });
+    expect(argQuery("/effort hi", 10)).toEqual({ command: "effort", query: "hi", start: 8 });
+    expect(argQuery("/code-review high --f", 21)).toBeNull();
+    expect(argQuery("/effort", 7)).toBeNull();
+    expect(argQuery("say /effort hi", 14)).toBeNull();
+  });
+
+  // Hints as Claude Code 2.1 reports them.
+  it("reads literal values from argument hints", () => {
+    expect(argChoices("<low|medium|high|xhigh|max|auto>")).toEqual(["low", "medium", "high", "xhigh", "max", "auto"]);
+    expect(argChoices("[on|off]")).toEqual(["on", "off"]);
+    expect(argChoices("[auto|<tokens>]")).toEqual(["auto"]);
+    expect(argChoices("[reconnect|enable|disable [<server>|all]]")).toEqual(["reconnect", "enable", "disable"]);
+    expect(argChoices("consent | revoke")).toEqual(["consent", "revoke"]);
+    expect(argChoices("[low|medium|high|xhigh|max|ultra] [--fix] [--comment] [<pr#>|<branch>|<path>]")).toEqual(["low", "medium", "high", "xhigh", "max", "ultra"]);
+  });
+
+  it("gives nothing for placeholders", () => {
+    for (const hint of ["<model>", "[name]", "key=value", "<optional custom summarization instructions>", "[interval] [prompt]", "[prompt-audit [<path>]]", "", undefined]) {
+      expect(argChoices(hint)).toBeNull();
+    }
+  });
+});
+
 describe("filterCommands", () => {
   const cmds = [
     { name: "compact", description: "Free up context", builtin: true },
@@ -56,6 +82,15 @@ describe("filterCommands", () => {
     expect(filterCommands(cmds, "co")[0]!.description).toBe("Free up context");
     expect(filterCommands(cmds, "draw").map((c) => c.name)).toEqual(["excalidraw"]);
     expect(filterCommands(cmds, "layout").map((c) => c.name)).toEqual(["excalidraw"]);
+  });
+
+  it("hides terminal-only built-ins, not user commands with the same name", () => {
+    const list = [
+      { name: "color", description: "Set the prompt bar color", builtin: true },
+      { name: "__remote-workflow", description: "internal", builtin: true },
+      { name: "focus", description: "My focus skill" },
+    ];
+    expect(filterCommands(list, "").map((c) => c.name)).toEqual(["focus"]);
   });
 
   it("matches aliases before descriptions", () => {

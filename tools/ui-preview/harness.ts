@@ -266,6 +266,16 @@ async function renderChat(): Promise<void> {
       await tick(50);
       view.onInput();
       break;
+    case "chat-effort-args":
+    case "chat-advisor-args": {
+      const text = scenario === "chat-effort-args" ? "/effort " : "/advisor ";
+      view.input.focus();
+      await tick(50);
+      view.input.value = text;
+      view.input.setSelectionRange(text.length, text.length);
+      view.onInput();
+      break;
+    }
     case "chat-mention":
       view.input.value = "Compare this with @al";
       view.input.focus();
