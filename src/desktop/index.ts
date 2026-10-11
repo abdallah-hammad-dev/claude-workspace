@@ -77,12 +77,9 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
   const installer = new Installer(app);
   const install = async () => {
     try {
-      const report = await installer.install(target(), plugin.registry.getSkills());
-      new Notice(
-        `Claude Workspace: wrote ${report.written.length} files. ${report.secretFiles.join(" and ")} contain the ` +
-          `server token: keep them out of git/sync. Restart any running claude session.`,
-        12000,
-      );
+      await installer.install(target(), plugin.registry.getSkills());
+      // Details (files written, token) are in the plugin settings; keep the first-run message plain.
+      new Notice("Vault connected: Claude now sees the note or drawing you're working in. Restart `claude` if it's open in a terminal.", 8000);
     } catch (e) {
       new Notice(`Claude Workspace: install failed — ${e instanceof Error ? e.message : String(e)}`, 10000);
     }

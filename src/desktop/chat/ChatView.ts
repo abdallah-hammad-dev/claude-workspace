@@ -201,7 +201,7 @@ export class ChatView extends ItemView {
     this.attachmentsEl = box.createDiv({ cls: "cw-attachments" });
     this.input = box.createEl("textarea", { cls: "cw-input", attr: { rows: "1" } });
     const footer = box.createDiv({ cls: "cw-input-footer" });
-    this.modeBtn = footer.createEl("button", { cls: "cw-footer-btn" });
+    this.modeBtn = footer.createEl("button", { cls: "cw-footer-btn cw-mode-btn" });
     this.modelBtn = footer.createEl("button", { cls: "cw-footer-btn" });
     this.effortBtn = footer.createEl("button", { cls: "cw-footer-btn" });
     footer.createDiv({ cls: "cw-spacer" });
@@ -289,6 +289,7 @@ export class ChatView extends ItemView {
     this.setBusy(true);
     try {
       session.send(content.length === 1 && text ? text : content);
+      this.loadInit(session);
     } catch (e) {
       this.transcript.addNote(`Could not send: ${e instanceof Error ? e.message : String(e)}`, "error");
       this.setBusy(false);
@@ -323,6 +324,12 @@ export class ChatView extends ItemView {
     if (!claudePath) return;
     const session = this.ensureSession(claudePath);
     session.warmup();
+    this.loadInit(session);
+  }
+
+  /** Slash commands and models (with their effort levels) once Claude Code has started. */
+  private loadInit(session: ChatSession): void {
+    if (this.commands) return;
     void session.initialization().then((init) => {
       if (!init || session !== this.session) return;
       this.commands = init.commands;
@@ -793,6 +800,8 @@ export class ChatView extends ItemView {
   private autoGrow(): void {
     this.input.style.height = "auto";
     this.input.style.height = `${Math.min(this.input.scrollHeight, 240)}px`;
+    // No scrollbar until the text is taller than the box (a long placeholder must not add one).
+    this.input.style.overflowY = this.input.value && this.input.scrollHeight > 240 ? "auto" : "hidden";
   }
 
   private clearInput(): void {
@@ -899,7 +908,8 @@ export class ChatView extends ItemView {
       text: "Claude sees the note or drawing you're working in and your selection, and can act on them.",
     });
     const list = el.createDiv({ cls: "cw-empty-suggestions" });
-    for (const s of suggestionsFor(this.lastCtx)) {
+    const excalidraw = this.host.registry.list().some((m) => m.id === "excalidraw" && m.status === "loaded");
+    for (const s of suggestionsFor(this.lastCtx, excalidraw)) {
       const b = list.createEl("button", { cls: "cw-empty-suggestion" });
       setIcon(b.createSpan(), s.icon);
       b.createSpan({ text: s.text });
@@ -1004,7 +1014,8 @@ function toModelChoices(models: ModelInfo[]): ModelChoice[] {
   for (const m of models) {
     const value = m.value === "default" ? "" : m.value;
     if (out.some((x) => x.value === value)) continue;
-    const efforts = m.supportsEffort === false ? [] : m.supportedEffortLevels;
+    // Models without effort control (e.g. Haiku 4.5) report neither field.
+    const efforts = m.supportsEffort || m.supportedEffortLevels ? (m.supportedEffortLevels ?? EFFORTS.map((e) => e.value)) : [];
     out.push({ value, label: m.displayName || m.value, desc: m.description ?? "", efforts });
   }
   if (!out.some((x) => x.value === "")) out.unshift(FALLBACK_MODELS[0]!);
@@ -1024,7 +1035,7 @@ function showMenuAbove(menu: Menu, anchor: HTMLElement): void {
   menu.showAtPosition({ x: rect.left, y: rect.top, overlap: true });
 }
 
-function suggestionsFor(ctx: ActiveContext | null): { icon: string; text: string }[] {
+function suggestionsFor(ctx: ActiveContext | null, excalidraw: boolean): { icon: string; text: string }[] {
   const view = ctx?.activeFile?.viewType;
   if (view === "excalidraw") {
     return [
@@ -1037,7 +1048,7 @@ function suggestionsFor(ctx: ActiveContext | null): { icon: string; text: string
     return [
       { icon: "file-text", text: "Summarize this note" },
       { icon: "search", text: "Find notes related to this one and suggest links" },
-      { icon: "shapes", text: "Draw a diagram of this note in Excalidraw" },
+      ...(excalidraw ? [{ icon: "shapes", text: "Draw a diagram of this note in Excalidraw" }] : [{ icon: "list-checks", text: "List the open questions in this note" }]),
     ];
   }
   return [

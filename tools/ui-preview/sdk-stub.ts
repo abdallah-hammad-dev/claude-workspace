@@ -16,7 +16,8 @@ export const FAKE_COMMANDS = [
 export const FAKE_MODELS = [
   { value: "default", displayName: "Default (recommended)", description: "Opus 5.5 · Most capable for complex work", supportsEffort: true, supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"] },
   { value: "sonnet", displayName: "Sonnet", description: "Sonnet 5.5 · Best for everyday tasks", supportsEffort: true, supportedEffortLevels: ["low", "medium", "high", "max"] },
-  { value: "haiku", displayName: "Haiku", description: "Haiku 5.5 · Fastest for quick answers", supportsEffort: false },
+  { value: "haiku", displayName: "Haiku", description: "Haiku 5.5 · Fastest for quick answers", supportsEffort: true, supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"] },
+  { value: "claude-haiku-4-5-20251001", displayName: "Haiku 4.5", description: "" },
   { value: "claude-opus-4-8", displayName: "claude-opus-4-8", description: "" },
 ];
 

@@ -159,7 +159,7 @@ describe.skipIf(!claudePath)("chat e2e (real Claude Code)", () => {
       claudePath: claudePath!,
       env: { ...process.env },
       mcpServers: {},
-      // Haiku has no effort levels; Claude Code exposes the level to Bash as CLAUDE_EFFORT.
+      // Claude Code exposes the effort level to Bash as CLAUDE_EFFORT.
       model: "sonnet",
       effort: "low",
       permissionMode: "default",

@@ -899,6 +899,7 @@ body:not(.is-mobile) .workspace-split:not(.mod-left-split) .cw-chat .cw-composer
   padding-bottom: calc(12px + 26px);
 }
 .cw-input-box {
+  container: cw-composer / inline-size;
   position: relative;
   display: flex;
   flex-direction: column;
@@ -1021,6 +1022,12 @@ button.cw-attachment-remove {
   font-family: inherit;
   font-size: var(--font-ui-medium);
   line-height: 1.5;
+  overflow-y: hidden;
+}
+.cw-input-box textarea.cw-input::placeholder {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .cw-input-footer {
   display: flex;
@@ -1046,6 +1053,12 @@ button.cw-footer-btn {
 button.cw-footer-btn:hover {
   background: var(--background-modifier-hover);
   color: var(--text-normal);
+}
+/* Narrow panels: the mode keeps its icon (and tooltip) so the model name has room. */
+@container cw-composer (max-width: 360px) {
+  .cw-mode-btn .cw-footer-label {
+    display: none;
+  }
 }
 button.cw-footer-btn.is-danger {
   color: var(--text-error);
