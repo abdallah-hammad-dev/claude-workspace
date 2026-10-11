@@ -1,4 +1,4 @@
-import { Notice, Platform, Plugin } from "obsidian";
+import { debounce, Notice, Platform, Plugin } from "obsidian";
 import { ContextEngine } from "./core/context/ContextEngine";
 import { createLogger } from "./core/logger";
 import type { ClaudeWorkspaceApi, WorkspaceModule } from "./core/module-api";
@@ -66,6 +66,10 @@ export default class ClaudeWorkspacePlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       void this.registry.start().then(() => this.log.debug("modules started"));
     });
+    // A dependency plugin enabled later (Excalidraw) makes its module available without a reload.
+    const retry = debounce(() => void this.registry.retryUnavailable(), 1000, true);
+    this.registerEvent(this.app.workspace.on("layout-change", retry));
+    this.registerEvent(this.app.workspace.on("active-leaf-change", retry));
   }
 
   override onunload(): void {

@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
-import { Notice, Setting } from "obsidian";
+import { debounce, Notice, Setting } from "obsidian";
 import { vaultBasePath } from "../core/paths";
 import { createLogger, setLogSink } from "../core/logger";
 import type ClaudeWorkspacePlugin from "../main";
@@ -86,6 +86,20 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
       new Notice(`Claude Workspace: install failed — ${e instanceof Error ? e.message : String(e)}`, 10000);
     }
   };
+
+  // Keep skills in sync once the vault is set up (e.g. a module became available later).
+  const syncSkills = debounce(
+    () =>
+      void installer.status(target()).then(async (ok) => {
+        if (!ok) return;
+        const written = await installer.writeSkills(plugin.registry.getSkills());
+        if (written.length) writeLog("info", `updated skills: ${written.join(", ")}`);
+      }),
+    500,
+    true,
+  );
+  plugin.register(plugin.registry.onChange((c) => c === "skills" && syncSkills()));
+  app.workspace.onLayoutReady(() => syncSkills());
 
   const resolveClaude = (): string | null => {
     if (plugin.data.claudePath) return plugin.data.claudePath;

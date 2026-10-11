@@ -243,3 +243,17 @@ describe("hello module", () => {
     expect(out).toBe("Hello, world");
   });
 });
+
+describe("retryUnavailable", () => {
+  it("loads a module once its dependency appears", async () => {
+    const { registry } = setup();
+    let present = false;
+    registry.add(fullModule("dep", { isAvailable: () => present }));
+    await registry.start();
+    expect(registry.list()[0]?.status).toBe("unavailable");
+    present = true;
+    await registry.retryUnavailable();
+    expect(registry.list()[0]?.status).toBe("loaded");
+    expect(registry.getTools()).toHaveLength(1);
+  });
+});

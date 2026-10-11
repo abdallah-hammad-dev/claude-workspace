@@ -118,6 +118,21 @@ export class ModuleRegistry {
     });
   }
 
+  /** Retry modules whose dependency was missing (e.g. Excalidraw enabled after us). */
+  async retryUnavailable(): Promise<void> {
+    if (!this.started) return;
+    const ids = [...this.entries.values()].filter((e) => e.status === "unavailable").map((e) => e.mod.id);
+    if (!ids.length) return;
+    await this.enqueue(async () => {
+      for (const id of ids) {
+        const entry = this.entries.get(id);
+        if (entry) entry.status = "pending";
+        await this.load(id);
+      }
+    });
+    if (ids.some((id) => this.entries.get(id)?.status === "loaded")) this.emit("modules");
+  }
+
   async setEnabled(id: string, enabled: boolean): Promise<void> {
     if (!this.entries.has(id)) throw new Error(`Unknown module "${id}"`);
     await this.host.setModuleEnabled(id, enabled);

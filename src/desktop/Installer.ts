@@ -41,14 +41,24 @@ export class Installer {
     await this.fs.write(SETTINGS, JSON.stringify(settings, null, 2) + "\n");
     const written = [MCP_JSON, SETTINGS];
 
+    written.push(...(await this.writeSkills(skills)));
+    return { written, secretFiles: [MCP_JSON, SETTINGS] };
+  }
+
+  /** Write module skills to `.claude/skills/<name>/SKILL.md`, only when they changed. */
+  async writeSkills(skills: SkillDef[]): Promise<string[]> {
+    const written: string[] = [];
     for (const skill of skills) {
       const dir = `.claude/skills/${skill.name}`;
+      const file = `${dir}/SKILL.md`;
+      if ((await this.fs.exists(file)) && (await this.fs.read(file)) === skill.markdown) continue;
+      await this.ensureDir(".claude");
       await this.ensureDir(".claude/skills");
       await this.ensureDir(dir);
-      await this.fs.write(`${dir}/SKILL.md`, skill.markdown);
-      written.push(`${dir}/SKILL.md`);
+      await this.fs.write(file, skill.markdown);
+      written.push(file);
     }
-    return { written, secretFiles: [MCP_JSON, SETTINGS] };
+    return written;
   }
 
   private async readJson(path: string): Promise<unknown> {
