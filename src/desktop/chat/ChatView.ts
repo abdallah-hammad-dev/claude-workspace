@@ -2,21 +2,24 @@ import {
   getSessionMessages,
   listSessions,
   type McpServerConfig,
-  type PermissionMode,
+  type ModelInfo,
   type SDKMessage,
   type SDKResultMessage,
   type SDKSessionInfo,
   type SDKSystemMessage,
+  type SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages";
-import { ItemView, Notice, setIcon, type App, type Plugin, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Menu, Notice, setIcon, setTooltip, type App, type Plugin, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type { ContextEngine } from "../../core/context/ContextEngine";
 import type { ActiveContext, Disposer, Logger } from "../../core/module-api";
 import type { ModuleRegistry } from "../../core/ModuleRegistry";
 import type { ChatPrefs } from "../../core/settings";
 import type { HostState, ServedContext } from "../McpHost";
 import { ChatSession } from "./ChatSession";
-import { askPermission, askQuestions, FilePickerModal, SessionPickerModal, sessionTitle } from "./modals";
+import { SessionPickerModal, sessionTitle } from "./modals";
+import { PromptDock } from "./PromptDock";
+import { filterCommands, filterFiles, InlineSuggest, mentionQuery, slashQuery } from "./suggest";
 import { Transcript, type UserBubble } from "./Transcript";
 
 export const CHAT_VIEW_TYPE = "claude-workspace-chat";
@@ -28,19 +31,27 @@ export const SYSTEM_PROMPT_APPEND =
   "automatically, not typed by the user. Use the mcp__obsidian__* tools to act on live Obsidian views " +
   "(e.g. excalidraw_* for open drawings) and obsidian_open_file to show the user a file.";
 
-const MODES: { value: ChatPrefs["permissionMode"]; label: string }[] = [
-  { value: "default", label: "Ask before edits" },
-  { value: "acceptEdits", label: "Accept edits" },
-  { value: "plan", label: "Plan" },
-  { value: "auto", label: "Auto" },
-  { value: "bypassPermissions", label: "Bypass permissions" },
+type Mode = ChatPrefs["permissionMode"];
+
+export const MODES: { value: Mode; label: string; icon: string; desc: string }[] = [
+  { value: "default", label: "Ask before edits", icon: "shield-check", desc: "Asks before editing files or running commands" },
+  { value: "acceptEdits", label: "Accept edits", icon: "file-pen", desc: "Edits files without asking; still asks before commands" },
+  { value: "plan", label: "Plan", icon: "map", desc: "Explores and proposes a plan; changes nothing until you approve" },
+  { value: "auto", label: "Auto", icon: "sparkles", desc: "Claude Code decides what is safe to do without asking" },
+  { value: "bypassPermissions", label: "Bypass permissions", icon: "shield-alert", desc: "Never asks. Only for throwaway vaults" },
 ];
 
-const DEFAULT_MODELS = [
-  { value: "", displayName: "Default model" },
-  { value: "opus", displayName: "Opus" },
-  { value: "sonnet", displayName: "Sonnet" },
-  { value: "haiku", displayName: "Haiku" },
+interface ModelChoice {
+  value: string;
+  label: string;
+  desc: string;
+}
+
+const FALLBACK_MODELS: ModelChoice[] = [
+  { value: "", label: "Default", desc: "Claude Code's default model" },
+  { value: "opus", label: "Opus", desc: "Most capable" },
+  { value: "sonnet", label: "Sonnet", desc: "Fast and capable" },
+  { value: "haiku", label: "Haiku", desc: "Fastest" },
 ];
 
 interface Attachment {
@@ -72,23 +83,35 @@ export interface ChatHost {
 export class ChatView extends ItemView {
   private session: ChatSession | null = null;
   private transcript!: Transcript;
+  private dock!: PromptDock;
+  private suggest!: InlineSuggest;
+  private scroller!: HTMLElement;
+  private emptyEl!: HTMLElement;
+  private workingEl!: HTMLElement;
   private bannerEl!: HTMLElement;
   private headerTitleEl!: HTMLElement;
-  private chipsEl!: HTMLElement;
+  private contextRowEl!: HTMLElement;
+  private contextPreviewEl!: HTMLElement;
   private attachmentsEl!: HTMLElement;
   private input!: HTMLTextAreaElement;
   private sendBtn!: HTMLButtonElement;
-  private modelSelect!: HTMLSelectElement;
-  private modeSelect!: HTMLSelectElement;
+  private modeBtn!: HTMLButtonElement;
+  private modelBtn!: HTMLButtonElement;
   private usageEl!: HTMLElement;
   private attachments: Attachment[] = [];
   private busy = false;
-  private pendingBubble: UserBubble | null = null;
+  private stickToBottom = true;
+  /** Messages waiting for the hook's context (in send order). */
+  private pendingBubbles: UserBubble[] = [];
+  /** The hook answered at least once in this conversation. */
+  private servedOnce = false;
   private resumeId: string | null = null;
   private contextWindow = 0;
   private lastContextTokens = 0;
   private costUsd = 0;
-  private models = DEFAULT_MODELS;
+  private models: ModelChoice[] = FALLBACK_MODELS;
+  private commands: SlashCommand[] | null = null;
+  private lastCtx: ActiveContext | null = null;
   private disposers: Disposer[] = [];
 
   constructor(
@@ -143,46 +166,73 @@ export class ChatView extends ItemView {
     this.iconButton(header, "square-pen", "New conversation", () => this.newConversation());
 
     this.bannerEl = root.createDiv({ cls: "cw-banner" });
-    const messages = root.createDiv({ cls: "cw-messages" });
-    this.transcript = new Transcript(this.app, this, messages, this.host.vaultPath, () => {
-      messages.scrollTop = messages.scrollHeight;
+
+    this.scroller = root.createDiv({ cls: "cw-messages is-empty" });
+    this.scroller.addEventListener("scroll", () => {
+      const s = this.scroller;
+      this.stickToBottom = s.scrollHeight - s.scrollTop - s.clientHeight < 48;
+    });
+    this.emptyEl = this.scroller.createDiv({ cls: "cw-empty" });
+    this.transcript = new Transcript(this.app, this, this.scroller.createDiv({ cls: "cw-transcript" }), this.host.vaultPath, () =>
+      this.scrollToBottom(),
+    );
+    this.workingEl = this.scroller.createDiv({ cls: "cw-working" });
+    for (let i = 0; i < 3; i++) this.workingEl.createSpan({ cls: "cw-working-dot" });
+    this.workingEl.createSpan({ cls: "cw-working-text", text: "Claude is working" });
+
+    this.dock = new PromptDock(root.createDiv(), {
+      app: this.app,
+      component: this,
+      vaultPath: this.host.vaultPath,
+      onChange: (pending) => this.onDockChange(pending),
+      onModeChosen: (mode) => void this.applyMode(mode as Mode, false),
     });
 
     const composer = root.createDiv({ cls: "cw-composer" });
-    this.chipsEl = composer.createDiv({ cls: "cw-chips" });
-    this.attachmentsEl = composer.createDiv({ cls: "cw-attachments" });
-    this.input = composer.createEl("textarea", {
-      cls: "cw-input",
-      attr: { placeholder: "Ask Claude… (Enter to send, Shift+Enter for a new line, @ to mention a file)", rows: "3" },
-    });
-    const toolbar = composer.createDiv({ cls: "cw-toolbar" });
-    this.modelSelect = toolbar.createEl("select", { cls: "dropdown cw-select" });
-    this.modeSelect = toolbar.createEl("select", { cls: "dropdown cw-select" });
-    this.usageEl = toolbar.createDiv({ cls: "cw-usage" });
-    this.sendBtn = toolbar.createEl("button", { cls: "mod-cta cw-send" });
+    this.suggest = new InlineSuggest(composer);
+    const box = composer.createDiv({ cls: "cw-input-box" });
+    this.contextRowEl = box.createDiv({ cls: "cw-context-row" });
+    this.contextPreviewEl = box.createEl("pre", { cls: "cw-context-preview" });
+    this.contextPreviewEl.hide();
+    this.attachmentsEl = box.createDiv({ cls: "cw-attachments" });
+    this.input = box.createEl("textarea", { cls: "cw-input", attr: { rows: "1" } });
+    const footer = box.createDiv({ cls: "cw-input-footer" });
+    this.modeBtn = footer.createEl("button", { cls: "cw-footer-btn" });
+    this.modelBtn = footer.createEl("button", { cls: "cw-footer-btn" });
+    footer.createDiv({ cls: "cw-spacer" });
+    this.usageEl = footer.createDiv({ cls: "cw-usage" });
+    this.sendBtn = footer.createEl("button", { cls: "cw-send" });
 
-    this.fillModels();
-    for (const m of MODES) this.modeSelect.createEl("option", { value: m.value, text: m.label });
-    this.modeSelect.value = this.host.prefs().permissionMode;
-    this.modelSelect.onchange = () => void this.changeModel(this.modelSelect.value);
-    this.modeSelect.onchange = () => void this.changeMode(this.modeSelect.value as PermissionMode);
-    this.sendBtn.onclick = () => (this.busy && !this.input.value.trim() ? void this.stop() : this.submit());
+    this.modeBtn.onclick = (e) => this.openModeMenu(e);
+    this.modelBtn.onclick = (e) => this.openModelMenu(e);
+    this.sendBtn.onclick = () => (this.isStopMode() ? void this.stop() : this.submit());
     this.input.addEventListener("keydown", (e) => this.onKeyDown(e));
     this.input.addEventListener("input", () => this.onInput());
+    this.input.addEventListener("focus", () => this.warm());
+    this.input.addEventListener("blur", () => window.setTimeout(() => this.suggest.hide(), 150));
     this.input.addEventListener("paste", (e) => this.onPaste(e));
+    box.addEventListener("click", (e) => {
+      if (e.target === box) this.input.focus();
+    });
     composer.addEventListener("dragover", (e) => e.preventDefault());
     composer.addEventListener("drop", (e) => this.onDrop(e));
 
-    this.disposers.push(this.host.engine.onChange(() => void this.refreshChips()));
+    this.disposers.push(this.host.engine.onChange(() => void this.refreshContext()));
     this.disposers.push(this.host.onContextServed((s) => this.onServed(s)));
+    this.updatePlaceholder();
+    this.updateModeButton();
+    this.updateModelButton();
     this.updateSendButton();
-    void this.refreshChips();
+    this.updateUsage();
+    this.renderEmpty();
+    void this.refreshContext();
     void this.refreshBanner();
   }
 
   override async onClose(): Promise<void> {
     this.disposers.forEach((d) => d());
     this.disposers = [];
+    this.dock?.cancelAll();
     this.session?.close();
     this.session = null;
   }
@@ -191,12 +241,27 @@ export class ChatView extends ItemView {
 
   private submit(): void {
     const text = this.input.value.trim();
+
+    // A card is waiting: the text answers it ("do this instead").
+    if (this.dock.pending) {
+      if (!text) return;
+      this.showTranscript();
+      this.transcript.addUser(text, { expectContext: false, label: "Instead" });
+      this.clearInput();
+      this.dock.answerWithText(text);
+      return;
+    }
     if (!text && !this.attachments.length) return;
+    if (text === "/clear") {
+      this.clearInput();
+      this.newConversation();
+      return;
+    }
 
     const claudePath = this.host.resolveClaude();
     if (!claudePath) {
       void this.refreshBanner();
-      new Notice("Claude Code executable not found — set it in the plugin settings.");
+      new Notice("Claude Code executable not found. Set it in the plugin settings.");
       return;
     }
     const session = this.ensureSession(claudePath);
@@ -206,10 +271,15 @@ export class ChatView extends ItemView {
     }));
     if (text) content.push({ type: "text", text });
 
-    this.pendingBubble = this.transcript.addUser(text, this.attachments.length);
-    this.input.value = "";
-    this.attachments = [];
-    this.renderAttachments();
+    this.showTranscript();
+    const isCommand = text.startsWith("/");
+    const bubble = this.transcript.addUser(text, { images: this.attachments.length, expectContext: !isCommand });
+    if (!isCommand) this.pendingBubbles.push(bubble);
+    if (this.headerTitleEl.getText() === "New conversation" && text && !isCommand) {
+      this.headerTitleEl.setText(text.length > 60 ? `${text.slice(0, 60)}…` : text);
+    }
+    this.clearInput();
+    this.stickToBottom = true;
     this.setBusy(true);
     try {
       session.send(content.length === 1 && text ? text : content);
@@ -232,13 +302,27 @@ export class ChatView extends ItemView {
       resume: this.resumeId ?? undefined,
       appendSystemPrompt: SYSTEM_PROMPT_APPEND,
       canUseTool: (toolName, input, opts) =>
-        toolName === "AskUserQuestion"
-          ? askQuestions(this.app, input, opts.signal)
-          : askPermission(this.app, this, { toolName, input, ...opts }),
+        toolName === "AskUserQuestion" ? this.dock.askQuestions(input, opts.signal) : this.dock.askPermission({ toolName, input, ...opts }),
       onMessage: (m) => this.onMessage(m),
       onEnd: (err) => this.onSessionEnd(err),
     });
     return this.session;
+  }
+
+  /** Start Claude Code in the background so slash commands and models are ready. */
+  private warm(): void {
+    if (this.session && this.commands) return;
+    const claudePath = this.host.resolveClaude();
+    if (!claudePath) return;
+    const session = this.ensureSession(claudePath);
+    session.warmup();
+    void session.initialization().then((init) => {
+      if (!init || session !== this.session) return;
+      this.commands = init.commands;
+      this.models = toModelChoices(init.models);
+      this.updateModelButton();
+      if (this.suggest.isOpen) this.onInput();
+    });
   }
 
   private async stop(): Promise<void> {
@@ -300,17 +384,11 @@ export class ChatView extends ItemView {
   }
 
   private onInit(m: SDKSystemMessage): void {
-    this.headerTitleEl.setText(this.headerTitleEl.getText() === "New conversation" ? "Conversation" : this.headerTitleEl.getText());
     const obsidian = m.mcp_servers.find((s) => s.name === "obsidian");
     if (!obsidian) this.transcript.addNote("The Obsidian MCP server isn't connected; Obsidian tools are unavailable.", "error");
     else if (obsidian.status !== "connected") {
       this.transcript.addNote(`Obsidian MCP server: ${obsidian.status}. Check the port in settings.`, "error");
     }
-    void this.session?.supportedModels().then((models) => {
-      if (!models.length) return;
-      this.models = [{ value: "", displayName: "Default model" }, ...models.filter((x) => x.value !== "default")];
-      this.fillModels();
-    });
   }
 
   private onResult(m: SDKResultMessage): void {
@@ -323,9 +401,9 @@ export class ChatView extends ItemView {
     }
     this.costUsd = m.total_cost_usd;
     for (const u of Object.values(m.modelUsage ?? {})) if (u.contextWindow) this.contextWindow = u.contextWindow;
-    // If the hook never answered for this turn, the vault config is missing or stale.
-    this.pendingBubble?.markMissing();
-    this.pendingBubble = null;
+    // The hook never answered in this conversation: the vault config is missing or stale.
+    if (!this.servedOnce) for (const b of this.pendingBubbles) b.markMissing();
+    this.pendingBubbles = this.pendingBubbles.filter((b) => !b.hasContext);
     this.setBusy(false);
     this.updateUsage();
   }
@@ -333,8 +411,9 @@ export class ChatView extends ItemView {
   private onSessionEnd(err?: Error): void {
     this.setBusy(false);
     this.transcript.endTurn();
-    this.pendingBubble = null;
+    this.dock.cancelAll();
     if (err) {
+      this.showTranscript();
       this.transcript.addNote(`Claude Code stopped: ${err.message}`, "error");
       // Keep the session id so the next message resumes the same conversation.
       this.resumeId = this.session?.sessionId ?? this.resumeId;
@@ -342,13 +421,15 @@ export class ChatView extends ItemView {
     }
   }
 
-  /** The vault's UserPromptSubmit hook fetched context: show it on the pending message. */
+  /** The vault's UserPromptSubmit hook fetched context: show it on the oldest waiting message. */
   private onServed(s: ServedContext): void {
-    const bubble = this.pendingBubble;
-    if (!bubble || bubble.hasContext) return;
     const mine = this.session?.sessionId ?? this.resumeId;
     if (mine && s.sessionId && s.sessionId !== mine) return;
+    const bubble = this.pendingBubbles.find((b) => !b.hasContext);
+    if (!bubble) return;
+    this.servedOnce = true;
     bubble.setContext(this.chipsFor(s.ctx), s.text);
+    this.pendingBubbles = this.pendingBubbles.filter((b) => !b.hasContext);
   }
 
   private trackUsage(usage: unknown): void {
@@ -359,28 +440,39 @@ export class ChatView extends ItemView {
   }
 
   private updateUsage(): void {
-    const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
-    const parts: string[] = [];
-    if (this.lastContextTokens) {
-      parts.push(
-        this.contextWindow
-          ? `${k(this.lastContextTokens)} / ${k(this.contextWindow)} (${Math.round((100 * this.lastContextTokens) / this.contextWindow)}%)`
-          : `${k(this.lastContextTokens)} tokens`,
-      );
+    this.usageEl.empty();
+    if (!this.lastContextTokens) {
+      this.usageEl.hide();
+      return;
     }
-    if (this.costUsd) parts.push(`$${this.costUsd.toFixed(2)}`);
-    this.usageEl.setText(parts.join(" · "));
-    this.usageEl.setAttr("aria-label", "Context used by the conversation · session cost");
+    this.usageEl.show();
+    const k = (n: number) => (n >= 1000 ? `${Math.round(n / 1000)}k` : String(n));
+    const pct = this.contextWindow ? Math.min(100, Math.round((100 * this.lastContextTokens) / this.contextWindow)) : null;
+    const ring = this.usageEl.createSpan({ cls: "cw-usage-ring" });
+    ring.style.setProperty("--cw-usage", `${pct ?? 0}%`);
+    this.usageEl.createSpan({ text: pct !== null ? `${pct}%` : k(this.lastContextTokens) });
+    this.usageEl.toggleClass("is-high", (pct ?? 0) >= 80);
+    const tip = [
+      `Context: ${k(this.lastContextTokens)}${this.contextWindow ? ` of ${k(this.contextWindow)}` : ""} tokens`,
+      this.costUsd ? `Session cost: $${this.costUsd.toFixed(2)}` : "",
+      "Type /compact to free up context.",
+    ];
+    setTooltip(this.usageEl, tip.filter(Boolean).join("\n"), { placement: "top" });
   }
 
   // ───────────────────────── sessions ─────────────────────────
 
   private newConversation(): void {
+    this.dock.cancelAll();
     this.session?.close();
     this.session = null;
+    this.commands = null;
     this.resumeId = null;
-    this.pendingBubble = null;
+    this.pendingBubbles = [];
+    this.servedOnce = false;
     this.transcript.clear();
+    this.scroller.addClass("is-empty");
+    this.renderEmpty();
     this.headerTitleEl.setText("New conversation");
     this.lastContextTokens = 0;
     this.costUsd = 0;
@@ -394,7 +486,7 @@ export class ChatView extends ItemView {
     try {
       sessions = await listSessions({ dir: this.host.vaultPath });
     } catch (e) {
-      new Notice(`Could not list sessions: ${e instanceof Error ? e.message : String(e)}`);
+      new Notice(`Could not list conversations: ${e instanceof Error ? e.message : String(e)}`);
       return;
     }
     sessions.sort((a, b) => b.lastModified - a.lastModified);
@@ -412,37 +504,101 @@ export class ChatView extends ItemView {
     this.headerTitleEl.setText(title ?? "Resumed conversation");
     try {
       const messages = await getSessionMessages(sessionId, { dir: this.host.vaultPath });
+      if (messages.length) this.showTranscript();
       for (const m of messages) this.transcript.renderHistoryMessage(m);
       this.transcript.endTurn();
+      this.stickToBottom = true;
+      this.scrollToBottom();
     } catch (e) {
+      this.showTranscript();
       this.transcript.addNote(`Could not load history: ${e instanceof Error ? e.message : String(e)}`, "error");
     }
     this.app.workspace.requestSaveLayout();
   }
 
-  // ───────────────────────── pickers ─────────────────────────
+  // ───────────────────────── mode & model ─────────────────────────
 
-  private fillModels(): void {
+  private openModeMenu(e: MouseEvent): void {
+    const current = this.host.prefs().permissionMode;
+    const menu = new Menu();
+    for (const m of MODES) {
+      menu.addItem((item) =>
+        item
+          .setTitle(menuLabel(m.label, m.desc))
+          .setIcon(m.icon)
+          .setChecked(m.value === current)
+          .setWarning(m.value === "bypassPermissions")
+          .onClick(() => void this.applyMode(m.value, true)),
+      );
+    }
+    showMenuAbove(menu, e);
+  }
+
+  private async applyMode(mode: Mode, tellSession: boolean): Promise<void> {
+    await this.host.savePrefs({ permissionMode: mode });
+    this.updateModeButton();
+    if (tellSession) await this.session?.setPermissionMode(mode);
+  }
+
+  private updateModeButton(): void {
+    const mode = MODES.find((m) => m.value === this.host.prefs().permissionMode) ?? MODES[0]!;
+    this.modeBtn.empty();
+    setIcon(this.modeBtn.createSpan({ cls: "cw-footer-icon" }), mode.icon);
+    this.modeBtn.createSpan({ cls: "cw-footer-label", text: mode.label });
+    this.modeBtn.toggleClass("is-danger", mode.value === "bypassPermissions");
+    setTooltip(this.modeBtn, `Permission mode: ${mode.desc}`, { placement: "top" });
+  }
+
+  private openModelMenu(e: MouseEvent): void {
+    this.warm();
     const current = this.host.prefs().model;
-    this.modelSelect.empty();
-    const list = this.models.some((m) => m.value === current) ? this.models : [...this.models, { value: current, displayName: current }];
-    for (const m of list) this.modelSelect.createEl("option", { value: m.value, text: m.displayName });
-    this.modelSelect.value = current;
+    const menu = new Menu();
+    const aliases = this.models.filter((m) => !m.value.startsWith("claude-"));
+    const ids = this.models.filter((m) => m.value.startsWith("claude-"));
+    for (const m of aliases) {
+      menu.addItem((item) =>
+        item
+          .setTitle(menuLabel(m.label, m.desc))
+          .setChecked(m.value === current)
+          .onClick(() => void this.changeModel(m.value)),
+      );
+    }
+    if (ids.length) {
+      menu.addSeparator();
+      for (const m of ids) {
+        menu.addItem((item) =>
+          item
+            .setTitle(m.label)
+            .setChecked(m.value === current)
+            .onClick(() => void this.changeModel(m.value)),
+        );
+      }
+    }
+    showMenuAbove(menu, e);
   }
 
   private async changeModel(model: string): Promise<void> {
     await this.host.savePrefs({ model });
+    this.updateModelButton();
     await this.session?.setModel(model || undefined);
   }
 
-  private async changeMode(mode: PermissionMode): Promise<void> {
-    await this.host.savePrefs({ permissionMode: mode as ChatPrefs["permissionMode"] });
-    await this.session?.setPermissionMode(mode);
+  private updateModelButton(): void {
+    const value = this.host.prefs().model;
+    const m = this.models.find((x) => x.value === value);
+    this.modelBtn.empty();
+    this.modelBtn.createSpan({ cls: "cw-footer-label", text: m?.label ?? (value || "Default") });
+    setIcon(this.modelBtn.createSpan({ cls: "cw-footer-chevron" }), "chevron-down");
+    setTooltip(this.modelBtn, "Model", { placement: "top" });
   }
 
   // ───────────────────────── composer ─────────────────────────
 
   private onKeyDown(e: KeyboardEvent): void {
+    if (this.suggest.handleKey(e)) {
+      e.preventDefault();
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       this.submit();
@@ -453,17 +609,66 @@ export class ChatView extends ItemView {
   }
 
   private onInput(): void {
+    this.autoGrow();
     this.updateSendButton();
-    const pos = this.input.selectionStart;
-    const before = this.input.value.slice(0, pos);
-    if (!/(^|\s)@$/.test(before)) return;
-    new FilePickerModal(this.app, (file) => {
-      if (file) {
-        const mention = /\s/.test(file.path) ? `@"${file.path}" ` : `@${file.path} `;
-        this.input.setRangeText(mention, pos - 1, pos, "end");
+    const value = this.input.value;
+    const cursor = this.input.selectionStart;
+
+    const slash = slashQuery(value, cursor);
+    if (slash !== null && !this.dock.pending) {
+      this.warm();
+      if (!this.commands) {
+        this.suggest.show([], () => undefined, "Loading commands…");
+        return;
       }
-      this.input.focus();
-    }).open();
+      const items = filterCommands(this.commands, slash).map((c) => ({
+        insert: `/${c.name} `,
+        title: `/${c.name}`,
+        hint: c.argumentHint || undefined,
+        description: c.description,
+      }));
+      this.suggest.show(items, (item) => this.replaceRange(0, cursor, item.insert), "No matching command");
+      return;
+    }
+
+    const mention = mentionQuery(value, cursor);
+    if (mention) {
+      const recent = this.app.workspace.getLastOpenFiles();
+      const paths = filterFiles(
+        this.app.vault.getFiles().map((f) => f.path),
+        mention.query,
+        recent,
+      );
+      const items = paths.map((p) => ({
+        insert: /\s/.test(p) ? `@"${p}" ` : `@${p} `,
+        title: p.split("/").pop() ?? p,
+        description: p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : undefined,
+        icon: p.endsWith(".excalidraw.md") ? "shapes" : p.endsWith(".md") ? "file-text" : "file",
+      }));
+      this.suggest.show(items, (item) => this.replaceRange(mention.start, cursor, item.insert), "No matching file");
+      return;
+    }
+    this.suggest.hide();
+  }
+
+  private replaceRange(from: number, to: number, text: string): void {
+    this.input.setRangeText(text, from, to, "end");
+    this.input.focus();
+    this.onInput();
+  }
+
+  private autoGrow(): void {
+    this.input.style.height = "auto";
+    this.input.style.height = `${Math.min(this.input.scrollHeight, 240)}px`;
+  }
+
+  private clearInput(): void {
+    this.input.value = "";
+    this.attachments = [];
+    this.renderAttachments();
+    this.suggest.hide();
+    this.autoGrow();
+    this.updateSendButton();
   }
 
   private onPaste(e: ClipboardEvent): void {
@@ -497,7 +702,8 @@ export class ChatView extends ItemView {
     this.attachments.forEach((a, i) => {
       const item = this.attachmentsEl.createDiv({ cls: "cw-attachment" });
       item.createEl("img", { attr: { src: `data:${a.mediaType};base64,${a.data}`, alt: a.name } });
-      const x = item.createEl("button", { cls: "cw-attachment-remove", text: "×", attr: { "aria-label": "Remove" } });
+      const x = item.createEl("button", { cls: "cw-attachment-remove", attr: { "aria-label": "Remove image" } });
+      setIcon(x, "x");
       x.onclick = () => {
         this.attachments.splice(i, 1);
         this.renderAttachments();
@@ -512,25 +718,100 @@ export class ChatView extends ItemView {
     this.updateSendButton();
   }
 
-  private updateSendButton(): void {
-    const stopMode = this.busy && !this.input.value.trim() && !this.attachments.length;
-    this.sendBtn.empty();
-    setIcon(this.sendBtn, stopMode ? "square" : "send");
-    this.sendBtn.setAttr("aria-label", stopMode ? "Stop (Esc)" : "Send (Enter)");
+  private isStopMode(): boolean {
+    return this.busy && !this.input.value.trim() && !this.attachments.length;
   }
 
-  // ───────────────────────── context chips & banners ─────────────────────────
+  private updateSendButton(): void {
+    const stop = this.isStopMode();
+    const empty = !this.input.value.trim() && !this.attachments.length;
+    this.sendBtn.empty();
+    setIcon(this.sendBtn, stop ? "square" : "arrow-up");
+    this.sendBtn.toggleClass("is-stop", stop);
+    this.sendBtn.toggleClass("is-disabled", !stop && empty);
+    this.sendBtn.setAttr("aria-label", stop ? "Stop (Esc)" : "Send (Enter)");
+  }
+
+  private updatePlaceholder(): void {
+    this.input.placeholder = this.dock.pending ? this.dock.composerHint : "Ask Claude… @ to mention a file, / for commands";
+  }
+
+  private onDockChange(pending: boolean): void {
+    this.updatePlaceholder();
+    this.scrollToBottom();
+    if (pending && !this.contentEl.isShown()) {
+      const notice = new Notice("Claude is waiting for your answer in the chat panel. Click to open it.", 8000);
+      notice.noticeEl.onclick = () => void this.app.workspace.revealLeaf(this.leaf);
+    }
+  }
+
+  // ───────────────────────── transcript chrome ─────────────────────────
+
+  private showTranscript(): void {
+    this.scroller.removeClass("is-empty");
+  }
+
+  private scrollToBottom(): void {
+    if (this.stickToBottom) this.scroller.scrollTop = this.scroller.scrollHeight;
+  }
+
+  private renderEmpty(): void {
+    if (!this.scroller.hasClass("is-empty")) return;
+    const el = this.emptyEl;
+    el.empty();
+    setIcon(el.createDiv({ cls: "cw-empty-icon" }), "bot");
+    el.createDiv({ cls: "cw-empty-title", text: "What can I help with?" });
+    el.createDiv({
+      cls: "cw-empty-sub",
+      text: "Claude sees the note or drawing you're working in and your selection, and can act on them.",
+    });
+    const list = el.createDiv({ cls: "cw-empty-suggestions" });
+    for (const s of suggestionsFor(this.lastCtx)) {
+      const b = list.createEl("button", { cls: "cw-empty-suggestion" });
+      setIcon(b.createSpan(), s.icon);
+      b.createSpan({ text: s.text });
+      b.onclick = () => {
+        this.input.value = s.text;
+        this.input.focus();
+        this.onInput();
+      };
+    }
+  }
+
+  // ───────────────────────── context & banners ─────────────────────────
 
   /** Live preview of what will be sent: display only, same data as the hook. */
-  private async refreshChips(): Promise<void> {
+  private async refreshContext(): Promise<void> {
     const ctx = await this.host.engine.collect();
-    this.chipsEl.empty();
+    this.lastCtx = ctx;
+    const row = this.contextRowEl;
+    row.empty();
+    const chip = row.createEl("button", { cls: "cw-context-chip" });
     const chips = this.chipsFor(ctx);
-    if (!chips.length) {
-      this.chipsEl.createSpan({ cls: "cw-chip cw-chip-muted", text: "no file focused" });
+    if (!ctx.activeFile) {
+      chip.addClass("is-muted");
+      setIcon(chip.createSpan({ cls: "cw-context-chip-icon" }), "eye");
+      chip.createSpan({ text: "No note focused" });
+    } else {
+      setIcon(chip.createSpan({ cls: "cw-context-chip-icon" }), ctx.activeFile.viewType === "excalidraw" ? "shapes" : "file-text");
+      chip.createSpan({ cls: "cw-context-chip-file", text: chips[0] ?? "" });
+      for (const extra of chips.slice(1)) chip.createSpan({ cls: "cw-context-chip-extra", text: extra });
+    }
+    setTooltip(chip, "Claude sees this with your next message. Click to preview exactly what is sent.", { placement: "top" });
+    chip.onclick = () => void this.toggleContextPreview();
+    if (this.contextPreviewEl.isShown()) void this.toggleContextPreview(true);
+    this.renderEmpty();
+  }
+
+  private async toggleContextPreview(refresh = false): Promise<void> {
+    const el = this.contextPreviewEl;
+    if (el.isShown() && !refresh) {
+      el.hide();
       return;
     }
-    for (const c of chips) this.chipsEl.createSpan({ cls: "cw-chip", text: c });
+    const { text } = await this.host.engine.renderCurrent();
+    el.setText(text || "Nothing: no note or drawing is focused.");
+    el.show();
   }
 
   private chipsFor(ctx: ActiveContext): string[] {
@@ -545,21 +826,28 @@ export class ChatView extends ItemView {
 
   private async refreshBanner(): Promise<void> {
     this.bannerEl.empty();
-    const add = (text: string, action?: { label: string; run: () => void }) => {
-      const row = this.bannerEl.createDiv({ cls: "cw-banner-row" });
-      row.createSpan({ text });
+    const add = (icon: string, title: string, text: string, action?: { label: string; run: () => void }) => {
+      const card = this.bannerEl.createDiv({ cls: "cw-banner-card" });
+      setIcon(card.createSpan({ cls: "cw-banner-icon" }), icon);
+      const body = card.createDiv({ cls: "cw-banner-body" });
+      body.createDiv({ cls: "cw-banner-title", text: title });
+      body.createDiv({ cls: "cw-banner-text", text });
       if (action) {
-        const b = row.createEl("button", { text: action.label });
+        const b = card.createEl("button", { cls: "mod-cta", text: action.label });
         b.onclick = action.run;
       }
     };
     if (!this.host.resolveClaude()) {
-      add("Claude Code isn't installed or wasn't found.", { label: "Settings", run: () => this.host.openSettings() });
+      add("triangle-alert", "Claude Code not found", "Install Claude Code, or set its path in settings.", {
+        label: "Settings",
+        run: () => this.host.openSettings(),
+      });
     }
     const state = this.host.serverState();
-    if (state.status === "error") add(`Local server not running: ${state.message}.`, { label: "Settings", run: () => this.host.openSettings() });
-    else if (!(await this.host.isInstalled())) {
-      add("Claude won't see what you're looking at until the vault config is installed.", {
+    if (state.status === "error") {
+      add("triangle-alert", "Local server not running", state.message, { label: "Settings", run: () => this.host.openSettings() });
+    } else if (!(await this.host.isInstalled())) {
+      add("plug", "Connect this vault", "Claude won't see what you're looking at until the vault config is installed.", {
         label: "Install",
         run: () =>
           void this.host.install().then(() => {
@@ -576,4 +864,50 @@ export class ChatView extends ItemView {
     setIcon(b, icon);
     b.onclick = onClick;
   }
+}
+
+function toModelChoices(models: ModelInfo[]): ModelChoice[] {
+  const out: ModelChoice[] = [];
+  for (const m of models) {
+    const value = m.value === "default" ? "" : m.value;
+    if (out.some((x) => x.value === value)) continue;
+    out.push({ value, label: m.displayName || m.value, desc: m.description ?? "" });
+  }
+  if (!out.some((x) => x.value === "")) out.unshift(FALLBACK_MODELS[0]!);
+  return out;
+}
+
+function menuLabel(title: string, desc: string): DocumentFragment {
+  return createFragment((f) => {
+    f.createDiv({ cls: "cw-menu-title", text: title });
+    if (desc) f.createDiv({ cls: "cw-menu-desc", text: desc });
+  });
+}
+
+/** Composer menus open upwards from their button. */
+function showMenuAbove(menu: Menu, e: MouseEvent): void {
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  menu.showAtPosition({ x: rect.left, y: rect.top, overlap: true });
+}
+
+function suggestionsFor(ctx: ActiveContext | null): { icon: string; text: string }[] {
+  const view = ctx?.activeFile?.viewType;
+  if (view === "excalidraw") {
+    return [
+      { icon: "shapes", text: "Describe this drawing" },
+      { icon: "sparkles", text: "Tidy up the layout of this drawing" },
+      { icon: "file-text", text: "Write a note that explains this drawing" },
+    ];
+  }
+  if (view === "markdown") {
+    return [
+      { icon: "file-text", text: "Summarize this note" },
+      { icon: "search", text: "Find notes related to this one and suggest links" },
+      { icon: "shapes", text: "Draw a diagram of this note in Excalidraw" },
+    ];
+  }
+  return [
+    { icon: "search", text: "What's in this vault?" },
+    { icon: "file-plus", text: "Create a note for today's ideas" },
+  ];
 }

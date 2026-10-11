@@ -1,15 +1,23 @@
 import { Keymap, MarkdownRenderer, TFile, setIcon, type App, type Component } from "obsidian";
 import type { SDKAssistantMessage, SDKPartialAssistantMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { toVaultPath } from "../../core/paths";
-import { displayToolName, renderToolInput, toolFilePath, toolResultText, toolSummary } from "./tool-render";
+import { displayToolName, renderToolInput, toolFilePath, toolIcon, toolResultText, toolSummary } from "./tool-render";
 
 type Block =
   | { kind: "text"; el: HTMLElement; text: string; final: boolean }
-  | { kind: "thinking"; el: HTMLElement; body: HTMLElement; text: string; final: boolean }
+  | { kind: "thinking"; thinking: ThinkingBlock; final: boolean }
   | { kind: "tool"; id: string; tool: ToolBlock; final: boolean };
 
 const RENDER_THROTTLE_MS = 80;
 const MAX_RESULT_CHARS = 4000;
+
+export interface UserMessageOptions {
+  images?: number;
+  /** Wait for the hook's context to show it under the message (false for slash commands, "instead" replies). */
+  expectContext?: boolean;
+  /** Small label above the bubble, e.g. "Instead". */
+  label?: string;
+}
 
 /**
  * Renders a conversation from SDK messages. Stream events give live text;
@@ -32,6 +40,10 @@ export class Transcript {
     el.addEventListener("click", (evt) => this.onClick(evt));
   }
 
+  get isEmpty(): boolean {
+    return this.el.childElementCount === 0;
+  }
+
   clear(): void {
     this.el.empty();
     this.streaming.clear();
@@ -39,19 +51,33 @@ export class Transcript {
     this.currentMessageId = null;
   }
 
-  addUser(text: string, imageCount = 0): UserBubble {
-    const el = this.el.createDiv({ cls: "cw-msg cw-user" });
-    const body = el.createDiv({ cls: "cw-user-text", text });
-    if (imageCount) body.createDiv({ cls: "cw-muted", text: `📎 ${imageCount} image${imageCount > 1 ? "s" : ""}` });
-    const chips = el.createDiv({ cls: "cw-sent-context" });
+  addUser(text: string, opts: UserMessageOptions = {}): UserBubble {
+    const turn = this.el.createDiv({ cls: "cw-user-turn" });
+    if (opts.label) turn.createDiv({ cls: "cw-user-label", text: opts.label });
+    const bubble = turn.createDiv({ cls: "cw-user-bubble" });
+    const command = /^\/\S+/.exec(text);
+    if (command) {
+      bubble.createSpan({ cls: "cw-user-command", text: command[0] });
+      bubble.appendText(text.slice(command[0].length));
+    } else bubble.setText(text);
+    if (opts.images) {
+      const att = bubble.createDiv({ cls: "cw-user-attachments" });
+      setIcon(att.createSpan(), "image");
+      att.createSpan({ text: `${opts.images} image${opts.images > 1 ? "s" : ""}` });
+    }
+    const meta = turn.createDiv({ cls: "cw-user-meta" });
     this.onScroll();
-    return new UserBubble(chips);
+    return new UserBubble(meta, opts.expectContext !== false);
   }
 
   addNote(text: string, kind: "info" | "error" | "divider" = "info"): HTMLElement {
     const el = this.el.createDiv({ cls: `cw-note cw-note-${kind}` });
-    if (kind === "divider") el.createSpan({ text });
-    else void this.renderMarkdown(el, text);
+    if (kind === "divider") {
+      el.createSpan({ text });
+    } else {
+      setIcon(el.createSpan({ cls: "cw-note-icon" }), kind === "error" ? "triangle-alert" : "info");
+      void this.renderMarkdown(el.createDiv({ cls: "cw-note-text" }), text);
+    }
     this.onScroll();
     return el;
   }
@@ -69,7 +95,7 @@ export class Transcript {
         const key = `${this.currentMessageId}:${ev.index}`;
         const cb = ev.content_block;
         if (cb.type === "text") this.streaming.set(key, this.newText());
-        else if (cb.type === "thinking") this.streaming.set(key, this.newThinking());
+        else if (cb.type === "thinking") this.streaming.set(key, { kind: "thinking", thinking: this.newThinking(), final: false });
         else if (cb.type === "tool_use" || cb.type === "server_tool_use") {
           this.streaming.set(key, { kind: "tool", id: cb.id, tool: this.newTool(cb.id, cb.name, {}), final: false });
         }
@@ -82,8 +108,7 @@ export class Transcript {
           block.text += ev.delta.text;
           this.scheduleRender(block.el, () => block.text);
         } else if (ev.delta.type === "thinking_delta" && block.kind === "thinking") {
-          block.text += ev.delta.thinking;
-          block.body.setText(block.text);
+          block.thinking.append(ev.delta.thinking);
         }
         break;
       }
@@ -93,7 +118,9 @@ export class Transcript {
   onAssistant(msg: SDKAssistantMessage): void {
     if (msg.parent_tool_use_id) {
       const parent = this.tools.get(msg.parent_tool_use_id);
-      for (const b of msg.message.content) if (b.type === "tool_use") parent?.addSubStep(`${displayToolName(b.name)} ${toolSummary(b.name, b.input as Record<string, unknown>)}`);
+      for (const b of msg.message.content) {
+        if (b.type === "tool_use") parent?.addSubStep(b.name, toolSummary(b.name, b.input as Record<string, unknown>, this.vaultPath));
+      }
       return;
     }
     const msgId = msg.message.id;
@@ -105,10 +132,10 @@ export class Transcript {
         block.final = true;
         this.flushRender(block.el, b.text);
       } else if (b.type === "thinking") {
-        const block = this.takeStreaming(msgId, "thinking") ?? this.newThinking();
-        if (block.kind !== "thinking") continue;
-        block.body.setText(b.thinking);
-        block.final = true;
+        const block = this.takeStreaming(msgId, "thinking");
+        const thinking = block?.kind === "thinking" ? block.thinking : this.newThinking();
+        thinking.finish(b.thinking);
+        if (block) block.final = true;
       } else if (b.type === "tool_use") {
         const existing = this.tools.get(b.id) ?? this.newTool(b.id, b.name, {});
         existing.setInput(b.input as Record<string, unknown>);
@@ -131,6 +158,7 @@ export class Transcript {
   /** Mark running tools as interrupted when a turn ends without their result. */
   endTurn(): void {
     for (const t of this.tools.values()) t.settle();
+    for (const b of this.streaming.values()) if (b.kind === "thinking") b.thinking.finish();
     this.streaming.clear();
   }
 
@@ -141,13 +169,13 @@ export class Transcript {
     const message = m.message as { content?: unknown; id?: string };
     if (m.type === "user") {
       if (typeof message.content === "string") {
-        if (!message.content.startsWith("<")) this.addUser(message.content);
+        if (!message.content.startsWith("<")) this.addUser(message.content, { expectContext: false });
         return;
       }
       if (Array.isArray(message.content)) {
         const texts = (message.content as { type: string; text?: string }[]).filter((b) => b.type === "text");
         const text = texts.map((t) => t.text ?? "").join("\n");
-        if (text && !text.startsWith("<")) this.addUser(text);
+        if (text && !text.startsWith("<")) this.addUser(text, { expectContext: false });
         this.onUser({ type: "user", message: message as never, parent_tool_use_id: null });
       }
     } else if (m.type === "assistant") {
@@ -171,19 +199,16 @@ export class Transcript {
   }
 
   private newText(): Block {
-    const el = this.el.createDiv({ cls: "cw-msg cw-assistant markdown-rendered" });
+    const el = this.el.createDiv({ cls: "cw-assistant markdown-rendered" });
     return { kind: "text", el, text: "", final: false };
   }
 
-  private newThinking(): Block {
-    const details = this.el.createEl("details", { cls: "cw-thinking" });
-    details.createEl("summary", { text: "Thinking" });
-    const body = details.createDiv({ cls: "cw-thinking-body" });
-    return { kind: "thinking", el: details, body, text: "", final: false };
+  private newThinking(): ThinkingBlock {
+    return new ThinkingBlock(this.el.createEl("details", { cls: "cw-thinking" }));
   }
 
   private newTool(id: string, name: string, input: Record<string, unknown>): ToolBlock {
-    const tool = new ToolBlock(this.el.createEl("details", { cls: "cw-tool" }), name, input, (p) => this.openPath(p));
+    const tool = new ToolBlock(this.el.createEl("details", { cls: "cw-tool" }), name, input, this.vaultPath, (p) => this.openPath(p));
     this.tools.set(id, tool);
     this.onScroll();
     return tool;
@@ -257,43 +282,84 @@ export class Transcript {
   }
 }
 
-/** Shows what context was injected for this message (exactly what the hook returned). */
+/** Shows, under the user's message, exactly what context the hook injected. */
 export class UserBubble {
-  private settled = false;
-  constructor(private readonly el: HTMLElement) {}
+  private settled: boolean;
+  constructor(
+    private readonly el: HTMLElement,
+    expectContext: boolean,
+  ) {
+    this.settled = !expectContext;
+  }
 
   get hasContext(): boolean {
     return this.settled;
   }
 
   setContext(chips: string[], fullText: string): void {
+    if (this.settled) return;
     this.settled = true;
     this.el.empty();
+    const pill = this.el.createEl("button", { cls: "cw-context-pill", attr: { "aria-label": "What Claude saw with this message" } });
+    setIcon(pill.createSpan({ cls: "cw-context-pill-icon" }), "eye");
+    pill.createSpan({ text: fullText ? chips.join(" · ") || "Obsidian context" : "No note focused" });
     if (!fullText) {
-      this.el.createSpan({ cls: "cw-chip cw-chip-muted", text: "no file focused" });
+      pill.addClass("is-muted");
+      pill.disabled = true;
       return;
     }
-    for (const c of chips) this.el.createSpan({ cls: "cw-chip", text: c });
-    const details = this.el.createEl("details", { cls: "cw-context-details" });
-    details.createEl("summary", { text: "context sent" });
-    details.createEl("pre", { text: fullText });
+    setIcon(pill.createSpan({ cls: "cw-context-pill-chevron" }), "chevron-down");
+    const preview = this.el.createEl("pre", { cls: "cw-context-preview", text: fullText });
+    preview.hide();
+    pill.onclick = () => {
+      const open = !pill.hasClass("is-open");
+      pill.toggleClass("is-open", open);
+      preview.toggle(open);
+    };
   }
 
   markMissing(): void {
     if (this.settled) return;
     this.settled = true;
     this.el.empty();
-    this.el.createSpan({
-      cls: "cw-chip cw-chip-warn",
-      text: "no Obsidian context — run “Install Claude Code config in this vault”",
-    });
+    const pill = this.el.createDiv({ cls: "cw-context-pill is-warning" });
+    setIcon(pill.createSpan({ cls: "cw-context-pill-icon" }), "triangle-alert");
+    pill.createSpan({ text: "Claude didn't receive Obsidian context. Install the vault config in settings." });
+  }
+}
+
+class ThinkingBlock {
+  private readonly body: HTMLElement;
+  private readonly label: HTMLElement;
+  private text = "";
+
+  constructor(private readonly el: HTMLDetailsElement) {
+    const summary = el.createEl("summary");
+    setIcon(summary.createSpan({ cls: "cw-row-icon" }), "brain");
+    this.label = summary.createSpan({ cls: "cw-thinking-label", text: "Thinking…" });
+    setIcon(summary.createSpan({ cls: "cw-row-chevron" }), "chevron-right");
+    this.body = el.createDiv({ cls: "cw-thinking-body" });
+    el.addClass("is-running");
+  }
+
+  append(delta: string): void {
+    this.text += delta;
+    this.body.setText(this.text);
+  }
+
+  finish(full?: string): void {
+    if (full !== undefined) {
+      this.text = full;
+      this.body.setText(full);
+    }
+    this.el.removeClass("is-running");
+    this.label.setText(this.text.trim() ? "Thought process" : "Thought");
   }
 }
 
 class ToolBlock {
   private readonly summaryEl: HTMLElement;
   private readonly statusEl: HTMLElement;
-  private readonly body: HTMLElement;
   private readonly inputEl: HTMLElement;
   private readonly subEl: HTMLElement;
   private readonly resultEl: HTMLElement;
@@ -303,44 +369,56 @@ class ToolBlock {
     private readonly el: HTMLDetailsElement,
     private readonly name: string,
     input: Record<string, unknown>,
+    private readonly vaultPath: string,
     private readonly openPath: (p: string) => void,
   ) {
     const summary = el.createEl("summary");
-    this.statusEl = summary.createSpan({ cls: "cw-tool-status is-running" });
-    setIcon(this.statusEl, "loader");
+    setIcon(summary.createSpan({ cls: "cw-row-icon" }), toolIcon(name));
     summary.createSpan({ cls: "cw-tool-name", text: displayToolName(name) });
     this.summaryEl = summary.createSpan({ cls: "cw-tool-summary" });
-    this.body = el.createDiv({ cls: "cw-tool-body" });
-    this.inputEl = this.body.createDiv();
-    this.subEl = this.body.createDiv({ cls: "cw-tool-substeps" });
-    this.resultEl = this.body.createDiv();
+    this.statusEl = summary.createSpan({ cls: "cw-tool-status is-running", attr: { "aria-label": "Running" } });
+    setIcon(this.statusEl, "loader");
+    setIcon(summary.createSpan({ cls: "cw-row-chevron" }), "chevron-right");
+    const body = el.createDiv({ cls: "cw-tool-body" });
+    this.inputEl = body.createDiv();
+    this.subEl = body.createDiv({ cls: "cw-tool-substeps" });
+    this.resultEl = body.createDiv();
+    el.addClass("is-running");
     this.setInput(input);
   }
 
   setInput(input: Record<string, unknown>): void {
-    this.summaryEl.setText(toolSummary(this.name, input));
+    this.summaryEl.setText(toolSummary(this.name, input, this.vaultPath));
     this.inputEl.empty();
     renderToolInput(this.inputEl, this.name, input);
     const path = toolFilePath(this.name, input);
     if (path && this.name !== "Read") {
-      const btn = this.inputEl.createEl("button", { cls: "cw-open-file", text: "Open file" });
+      const btn = this.inputEl.createEl("button", { cls: "cw-link-btn" });
+      setIcon(btn.createSpan(), "file-text");
+      btn.createSpan({ text: "Open file" });
       btn.onclick = () => this.openPath(path);
     }
-    // Edits are worth seeing without a click.
+    // Edits and plans are worth seeing without a click.
     if (["Edit", "MultiEdit", "Write", "TodoWrite"].includes(this.name)) this.el.open = true;
   }
 
-  addSubStep(text: string): void {
-    this.subEl.createDiv({ cls: "cw-muted", text: `↳ ${text}` });
+  addSubStep(name: string, summary: string): void {
+    const row = this.subEl.createDiv({ cls: "cw-substep" });
+    setIcon(row.createSpan({ cls: "cw-row-icon" }), toolIcon(name));
+    row.createSpan({ cls: "cw-tool-name", text: displayToolName(name) });
+    row.createSpan({ cls: "cw-tool-summary", text: summary });
   }
 
   setResult(text: string, isError: boolean): void {
     this.done = true;
+    this.el.removeClass("is-running");
+    this.el.toggleClass("is-error", isError);
     this.statusEl.className = `cw-tool-status ${isError ? "is-error" : "is-done"}`;
+    this.statusEl.setAttr("aria-label", isError ? "Failed" : "Done");
     setIcon(this.statusEl, isError ? "x" : "check");
     this.resultEl.empty();
     if (!text) return;
-    const shown = text.length > MAX_RESULT_CHARS ? text.slice(0, MAX_RESULT_CHARS) + `\n… (${text.length - MAX_RESULT_CHARS} more chars)` : text;
+    const shown = text.length > MAX_RESULT_CHARS ? text.slice(0, MAX_RESULT_CHARS) + `\n… (${text.length - MAX_RESULT_CHARS} more characters)` : text;
     this.resultEl.createEl("pre", { cls: `cw-tool-result${isError ? " is-error" : ""}`, text: shown });
     if (isError) this.el.open = true;
   }
@@ -348,7 +426,9 @@ class ToolBlock {
   settle(): void {
     if (this.done) return;
     this.done = true;
+    this.el.removeClass("is-running");
     this.statusEl.className = "cw-tool-status is-interrupted";
+    this.statusEl.setAttr("aria-label", "Interrupted");
     setIcon(this.statusEl, "minus");
   }
 }

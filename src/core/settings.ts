@@ -1,6 +1,7 @@
-import { PluginSettingTab, Setting, type App } from "obsidian";
+import { PluginSettingTab, Setting, setIcon, type App } from "obsidian";
 import type ClaudeWorkspacePlugin from "../main";
 import type { ModuleContents, ModuleStatus } from "./ModuleRegistry";
+import { settingGroup } from "./setting-group";
 
 export interface ModuleSettings {
   enabled?: boolean;
@@ -51,13 +52,16 @@ export function mergeData(saved: unknown): PluginData {
   };
 }
 
-const STATUS_LABEL: Record<string, string> = {
-  unavailable: " — unavailable (dependency missing)",
-  unsupported: " — not supported on this platform",
-  failed: " — failed to load",
+const BADGES: Record<ModuleStatus, { text: string; tone: string }> = {
+  loaded: { text: "On", tone: "ok" },
+  disabled: { text: "Off", tone: "off" },
+  pending: { text: "Starting…", tone: "off" },
+  unavailable: { text: "Needs its plugin", tone: "warn" },
+  unsupported: { text: "Desktop only", tone: "off" },
+  failed: { text: "Error", tone: "error" },
 };
 
-/** Extra settings sections contributed by the desktop layer (server, installer, chat). */
+/** Extra settings sections contributed by the desktop layer (connection, installer). */
 export type CoreSettingsSection = (containerEl: HTMLElement, refresh: () => void) => void;
 
 export class WorkspaceSettingTab extends PluginSettingTab {
@@ -71,34 +75,41 @@ export class WorkspaceSettingTab extends PluginSettingTab {
   override display(): void {
     const { containerEl, plugin } = this;
     containerEl.empty();
+    containerEl.addClass("cw-settings");
     const refresh = () => this.display();
 
     for (const section of plugin.coreSettingsSections) section(containerEl, refresh);
 
-    new Setting(containerEl).setName("Modules").setHeading();
+    const intro = containerEl.createDiv({ cls: "cw-settings-section" });
+    intro.createDiv({ cls: "cw-settings-title", text: "Modules" });
+    intro.createDiv({ cls: "cw-settings-desc", text: "Each module gives Claude tools, context or skills for one part of Obsidian." });
     for (const info of plugin.registry.list()) {
-      const setting = new Setting(containerEl)
-        .setName(info.name + (STATUS_LABEL[info.status] ?? ""))
-        .setDesc(info.error ? `Error: ${info.error}` : (info.description ?? ""));
-      setting.addToggle((t) =>
-        t
-          .setValue(plugin.registry.isEnabled(info.id))
-          .setDisabled(info.status === "unsupported" || info.required)
-          .onChange(async (v) => {
-            await plugin.registry.setEnabled(info.id, v);
-            refresh();
+      const list = settingGroup(containerEl, undefined, "cw-module-group");
+      const badge = info.required && info.status === "loaded" ? { text: "Always on", tone: "ok" } : BADGES[info.status];
+      new Setting(list)
+        .setName(
+          createFragment((f) => {
+            f.createSpan({ text: info.name });
+            f.createSpan({ cls: `cw-badge is-${badge.tone}`, text: badge.text });
           }),
-      );
-      renderContents(containerEl, plugin.registry.contentsOf(info.id), info.status);
+        )
+        .setDesc(info.error ? `Error: ${info.error}` : (info.description ?? ""))
+        .addToggle((t) =>
+          t
+            .setValue(plugin.registry.isEnabled(info.id))
+            .setDisabled(info.status === "unsupported" || info.required)
+            .onChange(async (v) => {
+              await plugin.registry.setEnabled(info.id, v);
+              refresh();
+            }),
+        );
+      if (info.status !== "loaded") continue;
+      renderContents(list.createDiv({ cls: "setting-item cw-module-contents-row" }), plugin.registry.contentsOf(info.id));
+      for (const { section } of plugin.registry.getSettingsSections().filter((x) => x.moduleId === info.id)) section.display(list);
     }
 
-    for (const { section } of plugin.registry.getSettingsSections()) {
-      new Setting(containerEl).setName(section.title).setHeading();
-      section.display(containerEl.createDiv());
-    }
-
-    new Setting(containerEl).setName("Advanced").setHeading();
-    new Setting(containerEl)
+    const advanced = settingGroup(containerEl, "Advanced");
+    new Setting(advanced)
       .setName("Debug logging")
       .setDesc("Log debug messages to the developer console. Never logs tokens or note contents.")
       .addToggle((t) =>
@@ -110,49 +121,56 @@ export class WorkspaceSettingTab extends PluginSettingTab {
   }
 }
 
-/** Collapsible "what this module adds" under its toggle. */
-function renderContents(parent: HTMLElement, c: ModuleContents, status: ModuleStatus): void {
+/** Collapsible "what this module adds", inside the module's card. */
+function renderContents(parent: HTMLElement, c: ModuleContents): void {
   const details = parent.createEl("details", { cls: "cw-module-contents" });
   const parts = [
     plural(c.tools.length, "tool"),
-    plural(c.contextProviders.length, "context provider"),
+    plural(c.contextProviders.length, "context source"),
     plural(c.skills.length, "skill"),
     plural(c.commands.length, "command"),
     plural(c.views.length, "view"),
   ].filter(Boolean);
-  details.createEl("summary", {
-    text: status !== "loaded" ? "What it adds: shown once the module is enabled and loaded" : `What it adds: ${parts.join(" · ") || "nothing"}`,
-  });
-  if (status !== "loaded") return;
+  const summary = details.createEl("summary");
+  setIcon(summary.createSpan({ cls: "cw-module-contents-chevron" }), "chevron-right");
+  summary.createSpan({ text: `What it adds: ${parts.join(" · ") || "nothing"}` });
 
-  const section = (title: string, hint: string, items: { name: string; desc?: string }[]) => {
+  const body = details.createDiv({ cls: "cw-module-contents-body" });
+  const section = (icon: string, title: string, hint: string, items: { name: string; desc?: string; tag?: string }[]) => {
     if (!items.length) return;
-    details.createEl("div", { cls: "cw-module-contents-title", text: title });
-    details.createEl("div", { cls: "cw-muted", text: hint });
-    const ul = details.createEl("ul");
+    const head = body.createDiv({ cls: "cw-module-contents-title" });
+    setIcon(head.createSpan(), icon);
+    head.createSpan({ text: title });
+    body.createDiv({ cls: "cw-module-contents-hint", text: hint });
+    const list = body.createDiv({ cls: "cw-module-contents-list" });
     for (const it of items) {
-      const li = ul.createEl("li");
-      li.createEl("code", { text: it.name });
-      if (it.desc) li.createSpan({ text: ` — ${it.desc}` });
+      const row = list.createDiv({ cls: "cw-module-contents-item" });
+      const top = row.createDiv();
+      top.createEl("code", { text: it.name });
+      if (it.tag) top.createSpan({ cls: "cw-badge is-off", text: it.tag });
+      if (it.desc) row.createDiv({ cls: "cw-module-contents-desc", text: it.desc });
     }
   };
   section(
+    "wrench",
     "MCP tools",
-    "What Claude can do. Served by the local MCP server as mcp__obsidian__<name>; Claude Code asks your permission per your mode.",
-    c.tools.map((t) => ({ name: t.name, desc: (t.readOnly ? "read-only. " : "") + firstSentence(t.description) })),
+    "What Claude can do. Claude Code asks your permission according to the chat's permission mode.",
+    c.tools.map((t) => ({ name: t.name, desc: firstSentence(t.description), tag: t.readOnly ? "read-only" : undefined })),
   );
   section(
+    "eye",
     "Context",
-    "What Claude sees before each of your messages (the <obsidian_context> block).",
-    c.contextProviders.map((p) => ({ name: p.id, desc: `when the focused view is ${p.viewTypes.includes("*") ? "any view" : p.viewTypes.join(", ")}` })),
+    "What Claude sees with each of your messages.",
+    c.contextProviders.map((p) => ({ name: p.id, desc: `When the focused view is ${p.viewTypes.includes("*") ? "any view" : p.viewTypes.join(", ")}` })),
   );
   section(
+    "book-open",
     "Claude Code skills",
-    "Instructions Claude loads when a request is about this topic. Written to .claude/skills/<name>/SKILL.md.",
+    "Instructions Claude loads when a request is about this topic (.claude/skills/<name>/SKILL.md).",
     c.skills.map((name) => ({ name })),
   );
-  section("Obsidian commands", "For you, in the command palette.", c.commands.map((name) => ({ name })));
-  section("Views", "Panels this module can open.", c.views.map((name) => ({ name })));
+  section("command", "Obsidian commands", "For you, in the command palette.", c.commands.map((name) => ({ name })));
+  section("layout-panel-left", "Views", "Panels this module can open.", c.views.map((name) => ({ name })));
 }
 
 function plural(n: number, word: string): string {

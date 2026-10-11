@@ -61,6 +61,7 @@ npm test            # unit tests (Vitest, with an obsidian stub)
 npm run lint
 npm run build       # → main.js
 npm run test:e2e    # real Claude Code CLI against the real MCP server (uses your login; Haiku, a few cents)
+npm run ui:preview  # screenshots of the chat view and settings with Obsidian's real stylesheet
 ```
 
 ### Try it in a test vault

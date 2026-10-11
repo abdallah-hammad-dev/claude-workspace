@@ -114,6 +114,13 @@ describe.skipIf(!claudePath)("chat e2e (real Claude Code)", () => {
       });
 
     const session = make();
+    // Warm start: slash commands and models are available before the first message.
+    session.warmup();
+    const init = await session.initialization();
+    expect(init?.commands.some((c) => c.name === "compact")).toBe(true);
+    expect(init?.models.length).toBeGreaterThan(0);
+    expect(served).toHaveLength(0);
+
     session.send("Which file am I looking at? Reply with the path only.");
     const t1 = await runTurn(session, messages);
     expect(finalText(t1)).toContain("Projects/Beta.md");

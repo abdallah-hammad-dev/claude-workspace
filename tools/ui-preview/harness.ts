@@ -1,0 +1,293 @@
+/**
+ * Renders the real chat view and settings tab in a browser, in fixed scenarios,
+ * for screenshots (see shoot.mjs). Not shipped in the plugin.
+ */
+import { ChatView, type ChatHost } from "../../src/desktop/chat/ChatView";
+import { renderConnectionSettings } from "../../src/desktop/connection-settings";
+import { ModuleRegistry } from "../../src/core/ModuleRegistry";
+import { WorkspaceSettingTab, mergeData } from "../../src/core/settings";
+import { builtinModules } from "../../src/modules";
+import type { ActiveContext } from "../../src/core/module-api";
+import { TFile } from "./obsidian-browser";
+
+/* eslint-disable @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-argument */
+
+const VAULT = "C:\\Users\\abdal\\Documents\\cw-test-vault";
+const params = new URLSearchParams(location.search);
+const scenario = params.get("scenario") ?? "chat-empty";
+document.body.classList.add(params.get("theme") === "dark" ? "theme-dark" : "theme-light");
+
+const files = ["Welcome.md", "Projects/Alpha.md", "Projects/Beta.md", "Drawings/Architecture.excalidraw.md", "Daily/2026-10-11.md"].map(
+  (p) => new TFile(p),
+);
+const app: any = {
+  workspace: {
+    getLastOpenFiles: () => ["Projects/Alpha.md", "Welcome.md"],
+    requestSaveLayout() {},
+    revealLeaf: async () => undefined,
+    openLinkText: async () => undefined,
+    getLeaf: () => ({ openFile: async () => undefined }),
+    detachLeavesOfType() {},
+    getLeavesOfType: () => [],
+    on: () => ({}),
+  },
+  vault: { getFiles: () => files, getAbstractFileByPath: (p: string) => files.find((f) => f.path === p) ?? null },
+  plugins: { plugins: { "obsidian-excalidraw-plugin": {} } },
+  commands: { commands: { "daily-notes:goto-today": { id: "daily-notes:goto-today", name: "Open today's daily note" } }, executeCommandById: () => true },
+};
+const plugin: any = { app, addCommand() {}, removeCommand() {}, registerView() {}, manifest: { id: "claude-workspace", version: "0.0.1" } };
+
+const ctx: ActiveContext = {
+  activeFile: { path: "Projects/Alpha.md", viewType: "markdown" },
+  mode: "source",
+  providers: { "markdown.editor": { cursor: { line: 12, ch: 0 }, section: ["Alpha", "Notes"], selection: { fromLine: 11, toLine: 12, text: "Select this paragraph…", truncated: false } } },
+  openTabs: [{ path: "Projects/Alpha.md", viewType: "markdown" }, { path: "Welcome.md", viewType: "markdown" }],
+};
+const CONTEXT_TEXT = [
+  "<obsidian_context>",
+  "The user is currently looking at: Projects/Alpha.md (view: markdown, mode: source).",
+  '"This file", "this note", "this drawing", "here" refer to it.',
+  "Cursor at line 12 (section: Alpha › Notes).",
+  '<selected_text lines="11-12">',
+  "Select this paragraph and ask Claude \"what did I select?\"",
+  "</selected_text>",
+  "Other open tabs: Welcome.md",
+  "</obsidian_context>",
+].join("\n");
+
+const data = mergeData({ modules: { hello: { enabled: false } } });
+const registry = new ModuleRegistry({
+  app,
+  plugin,
+  platform: "desktop",
+  isDebug: () => false,
+  isModuleEnabled: (id) => data.modules[id]?.enabled,
+  setModuleEnabled: async (id, enabled) => {
+    data.modules[id] = { ...data.modules[id], enabled };
+  },
+  loadModuleData: (id) => data.modules[id]?.data,
+  saveModuleData: async () => undefined,
+  getActiveContext: async () => ctx,
+  getActiveView: () => null,
+  notifyContextChanged: () => undefined,
+});
+for (const m of builtinModules) registry.add(m);
+
+async function main(): Promise<void> {
+  await registry.start();
+  if (scenario === "settings") await renderSettings();
+  else await renderChat();
+  (window as any).__ready = true;
+}
+
+// ───────────────────────── settings ─────────────────────────
+
+async function renderSettings(): Promise<void> {
+  const frame = document.body.createDiv({ cls: "modal mod-settings cw-preview-settings" });
+  const content = frame.createDiv({ cls: "vertical-tab-content-container" });
+  const fakePlugin: any = {
+    ...plugin,
+    registry,
+    data,
+    persist: async () => undefined,
+    coreSettingsSections: [
+      (el: HTMLElement, refresh: () => void) =>
+        renderConnectionSettings(
+          el,
+          {
+            claudePathOverride: "",
+            setClaudePathOverride: async () => undefined,
+            detectedClaude: "C:\\Users\\abdal\\.local\\bin\\claude.exe",
+            serverState: { status: "listening", port: 27557 },
+            port: null,
+            defaultPort: 27557,
+            setPort: async () => undefined,
+            restartServer: async () => undefined,
+            installStatus: async () => params.get("installed") !== "0",
+            install: async () => undefined,
+            copyMcpAddCommand: async () => undefined,
+            regenerateToken: async () => undefined,
+          },
+          refresh,
+        ),
+    ],
+  };
+  const tab = new WorkspaceSettingTab(app, fakePlugin);
+  content.appendChild(tab.containerEl);
+  tab.display();
+  await tick();
+  // Show the contents of the Excalidraw module card.
+  tab.containerEl.querySelectorAll<HTMLDetailsElement>(".cw-module-contents")[3]?.setAttribute("open", "");
+}
+
+// ───────────────────────── chat ─────────────────────────
+
+async function renderChat(): Promise<void> {
+  const prefs = { model: "", permissionMode: (params.get("mode") ?? "default") as "default" };
+  const host: ChatHost = {
+    app,
+    plugin,
+    vaultPath: VAULT,
+    engine: {
+      onChange: () => () => undefined,
+      collect: async () => ctx,
+      renderCurrent: async () => ({ ctx, text: CONTEXT_TEXT }),
+    } as any,
+    registry,
+    prefs: () => prefs,
+    savePrefs: async (p) => void Object.assign(prefs, p),
+    resolveClaude: () => (scenario === "chat-banner" ? null : "C:\\Users\\abdal\\.local\\bin\\claude.exe"),
+    spawnEnv: () => ({}),
+    mcpServers: () => ({}),
+    serverState: () => ({ status: "listening", port: 27557 }),
+    isInstalled: async () => scenario !== "chat-banner",
+    install: async () => undefined,
+    onContextServed: () => () => undefined,
+    openSettings() {},
+    log: { debug() {}, info() {}, warn() {}, error: console.error },
+  };
+
+  const shell = document.body.createDiv({ cls: "workspace" });
+  const split = shell.createDiv({ cls: "workspace-split mod-horizontal mod-sidedock mod-right-split" });
+  const tabs = split.createDiv({ cls: "workspace-tabs mod-top mod-top-right-space" });
+  const container = tabs.createDiv({ cls: "workspace-tab-container" });
+  const leafEl = container.createDiv({ cls: "workspace-leaf mod-active" });
+  const view = new ChatView({ app } as any, host) as any;
+  leafEl.appendChild(view.containerEl);
+  view.containerEl.dataset.type = "claude-workspace-chat";
+  const status = document.body.createDiv({ cls: "status-bar" });
+  for (const t of ["0 backlinks", "35 words  246 characters", "✳ Claude"]) status.createDiv({ cls: "status-bar-item", text: t });
+
+  await view.onOpen();
+  await tick();
+
+  const t = view.transcript;
+  const say = (m: any) => view.onMessage(m);
+  const assistant = (id: string, content: any[]) => say({ type: "assistant", message: { id, content, usage: { input_tokens: 61000, output_tokens: 1200 } }, parent_tool_use_id: null });
+  const result = (id: string, text: string, isError = false) =>
+    say({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: id, content: text, is_error: isError }] }, parent_tool_use_id: null });
+
+  const conversation = async () => {
+    view.showTranscript();
+    t.addUser("Summarize this note and fix the typo in the goals").setContext(["Alpha.md", "L11–12 selected"], CONTEXT_TEXT);
+    assistant("m1", [
+      { type: "thinking", thinking: "The user is in Projects/Alpha.md with lines 11–12 selected. I'll read the note first." },
+      { type: "tool_use", id: "t1", name: "Read", input: { file_path: `${VAULT}\\Projects\\Alpha.md` } },
+    ]);
+    result("t1", "1\t---\n2\tstatus: active\n3\t---\n4\t# Alpha\n…");
+    assistant("m2", [
+      { type: "text", text: "**Alpha** tracks the plugin skeleton. Two goals:\n\n1. Ship the skeleton.\n2. Make context follow the cursor.\n\nThere's a typo in goal 2, fixing it in `Projects/Alpha.md`:" },
+      { type: "tool_use", id: "t2", name: "Edit", input: { file_path: `${VAULT}\\Projects\\Alpha.md`, old_string: "2. Make contxt follow the cursor.", new_string: "2. Make context follow the cursor." } },
+    ]);
+    result("t2", "The file has been updated.");
+    t.addUser("/compact", { expectContext: false });
+    t.addNote("Conversation compacted", "divider");
+    t.addUser("Now draw the architecture in my drawing").setContext(["Architecture.excalidraw.md", "2 elements selected"], CONTEXT_TEXT);
+    assistant("m3", [
+      { type: "tool_use", id: "t3", name: "mcp__obsidian__excalidraw_get_scene", input: {} },
+    ]);
+    result("t3", '{"elementCount": 2}');
+    assistant("m4", [{ type: "tool_use", id: "t4", name: "Bash", input: { command: "git log --oneline -5", description: "Show recent commits" } }]);
+    view.contextWindow = 200000;
+    view.trackUsage({ input_tokens: 61000, output_tokens: 7000 });
+    view.costUsd = 0.42;
+    view.updateUsage();
+    view.setBusy(true);
+  };
+
+  const abort = new AbortController().signal;
+  switch (scenario) {
+    case "chat-conversation":
+      await conversation();
+      break;
+    case "chat-permission-edit":
+      view.showTranscript();
+      t.addUser("Fix the typo in goal 2").setContext(["Alpha.md"], CONTEXT_TEXT);
+      view.setBusy(true);
+      void view.dock.askPermission({
+        toolName: "Edit",
+        input: { file_path: `${VAULT}\\Projects\\Alpha.md`, old_string: "## Goals\n1. Ship the skeleton.\n2. Make contxt follow the cursor.", new_string: "## Goals\n1. Ship the skeleton.\n2. Make context follow the cursor." },
+        suggestions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }],
+        signal: abort,
+      });
+      break;
+    case "chat-permission-bash":
+      view.showTranscript();
+      t.addUser("Run the tests").setContext(["Alpha.md"], CONTEXT_TEXT);
+      view.setBusy(true);
+      void view.dock.askPermission({
+        toolName: "Bash",
+        input: { command: "npm test -- --reporter=verbose", description: "Run the unit tests" },
+        suggestions: [{ type: "addRules", rules: [{ toolName: "Bash", ruleContent: "npm test:*" }], behavior: "allow", destination: "localSettings" }],
+        decisionReason: "Commands that run code always ask in this mode.",
+        signal: abort,
+      });
+      void view.dock.askPermission({ toolName: "Bash", input: { command: "ls" }, signal: abort });
+      break;
+    case "chat-permission-mcp":
+      view.showTranscript();
+      t.addUser("Add a database box connected to the API").setContext(["Architecture.excalidraw.md"], CONTEXT_TEXT);
+      view.setBusy(true);
+      void view.dock.askPermission({
+        toolName: "mcp__obsidian__excalidraw_apply",
+        input: { ops: [{ op: "add_shape", ref: "db", shape: "ellipse", x: 440, y: 0, text: "Database" }, { op: "connect", from: "api", to: "db", text: "SQL" }] },
+        suggestions: [{ type: "addRules", rules: [{ toolName: "mcp__obsidian__excalidraw_apply" }], behavior: "allow", destination: "localSettings" }],
+        signal: abort,
+      });
+      break;
+    case "chat-plan":
+      view.showTranscript();
+      t.addUser("Reorganize my Projects folder").setContext(["Alpha.md"], CONTEXT_TEXT);
+      view.setBusy(true);
+      void view.dock.askPermission({
+        toolName: "ExitPlanMode",
+        input: { plan: "## Plan\n\n1. Create `Projects/Archive/` for finished projects.\n2. Move **Beta** there (status: done).\n3. Add a `Projects/Index.md` linking every active project.\n\nNothing else changes." },
+        signal: abort,
+      });
+      break;
+    case "chat-question":
+      view.showTranscript();
+      t.addUser("Set up a weekly review note").setContext(["Welcome.md"], CONTEXT_TEXT);
+      view.setBusy(true);
+      void view.dock.askQuestions(
+        {
+          questions: [
+            { header: "Day", question: "Which day should the weekly review be on?", multiSelect: false, options: [{ label: "Friday", description: "End of the work week" }, { label: "Sunday", description: "Before the new week starts" }] },
+            { header: "Sections", question: "What should it include?", multiSelect: true, options: [{ label: "Wins", description: "" }, { label: "Open tasks", description: "From the Tasks plugin" }, { label: "Next week", description: "" }] },
+          ],
+        },
+        abort,
+      );
+      break;
+    case "chat-slash":
+      view.input.focus();
+      view.input.value = "/co";
+      view.input.setSelectionRange(3, 3);
+      await tick(50);
+      view.onInput();
+      break;
+    case "chat-mention":
+      view.input.value = "Compare this with @al";
+      view.input.focus();
+      view.input.setSelectionRange(21, 21);
+      view.onInput();
+      break;
+    case "chat-mode-menu":
+      await conversation();
+      view.setBusy(false);
+      view.modeBtn.click();
+      break;
+    case "chat-context-preview":
+      view.contextRowEl.querySelector("button")?.click();
+      break;
+    default:
+      break;
+  }
+  await tick(100);
+}
+
+function tick(ms = 0): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+void main();

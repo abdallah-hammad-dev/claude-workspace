@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
-import { debounce, Notice, Setting } from "obsidian";
+import { debounce, Notice } from "obsidian";
 import { vaultBasePath } from "../core/paths";
 import { createLogger, setLogSink } from "../core/logger";
 import type ClaudeWorkspacePlugin from "../main";
@@ -12,6 +12,7 @@ import { patchSetMaxListenersForElectron } from "./electron-compat";
 import { defaultPortFor, generateToken } from "./http-guard";
 import { Installer } from "./Installer";
 import { mcpAddCommand, type InstallTarget } from "./installer-merge";
+import { renderConnectionSettings } from "./connection-settings";
 import { McpHost, SERVER_NAME, type ServedContext } from "./McpHost";
 
 export interface DesktopServices {
@@ -170,101 +171,40 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
     callback: () => void navigator.clipboard.writeText(mcpAddCommand(target())).then(() => new Notice("Copied")),
   });
 
-  plugin.coreSettingsSections.push((el, refresh) => {
-    new Setting(el).setName("Claude Code").setHeading();
-
-    const detected = resolveClaude();
-    new Setting(el)
-      .setName("Claude Code executable")
-      .setDesc(
-        plugin.data.claudePath
-          ? "Custom path."
-          : detected
-            ? `Auto-detected: ${detected}`
-            : "Not found. Install Claude Code (https://code.claude.com) or enter the path to claude / claude.exe.",
-      )
-      .addText((t) =>
-        t
-          .setPlaceholder(detected ?? "path to claude")
-          .setValue(plugin.data.claudePath)
-          .onChange(async (v) => {
-            plugin.data.claudePath = v.trim();
-            await plugin.persist();
-          }),
-      );
-
-    const state = host.state;
-    new Setting(el)
-      .setName("Local server")
-      .setDesc(
-        state.status === "listening"
-          ? `Listening on 127.0.0.1:${state.port} (MCP at /mcp, hook at /context).`
-          : state.status === "error"
-            ? `Not running: ${state.message}`
-            : "Stopped.",
-      )
-      .addText((t) =>
-        t
-          .setPlaceholder(String(defaultPortFor(vaultPath)))
-          .setValue(plugin.data.server.port ? String(plugin.data.server.port) : "")
-          .onChange(async (v) => {
-            const n = parseInt(v, 10);
-            plugin.data.server.port = n > 1024 && n < 65536 ? n : null;
-            await plugin.persist();
-          }),
-      )
-      .addButton((b) =>
-        b.setButtonText("Restart").onClick(async () => {
-          await restartServer();
-          refresh();
-        }),
-      );
-
-    const installSetting = new Setting(el)
-      .setName("Install into this vault")
-      .setDesc("Writes .mcp.json (MCP server), .claude/settings.json (context hook) and module skills. Merges with existing files.")
-      .addButton((b) =>
-        b
-          .setButtonText("Install")
-          .setCta()
-          .onClick(async () => {
-            await install();
-            refresh();
-          }),
-      );
-    void installer.status(target()).then((ok) => {
-      installSetting.setDesc(
-        (ok ? "✅ Installed and up to date. " : "⚠️ Not installed (or outdated port/token). ") +
-          "Writes .mcp.json, .claude/settings.json and module skills; merges with existing files.",
-      );
-    });
-
-    new Setting(el)
-      .setName("Register for all projects")
-      .setDesc("Copies a `claude mcp add --scope user …` command, for using the tools from any folder.")
-      .addButton((b) =>
-        b.setButtonText("Copy command").onClick(async () => {
+  plugin.coreSettingsSections.push((el, refresh) =>
+    renderConnectionSettings(
+      el,
+      {
+        claudePathOverride: plugin.data.claudePath,
+        setClaudePathOverride: async (v) => {
+          plugin.data.claudePath = v;
+          await plugin.persist();
+        },
+        detectedClaude: locateClaude({ platform: process.platform, home: homedir(), env: process.env, isFile }),
+        serverState: host.state,
+        port: plugin.data.server.port,
+        defaultPort: defaultPortFor(vaultPath),
+        setPort: async (n) => {
+          plugin.data.server.port = n;
+          await plugin.persist();
+        },
+        restartServer,
+        installStatus: () => installer.status(target()),
+        install,
+        copyMcpAddCommand: async () => {
           await navigator.clipboard.writeText(mcpAddCommand(target()));
           new Notice("Copied");
-        }),
-      );
-
-    new Setting(el)
-      .setName("Regenerate token")
-      .setDesc("Invalidates the old token. Install again afterwards.")
-      .addButton((b) =>
-        b
-          .setButtonText("Regenerate")
-          .setWarning()
-          .onClick(async () => {
-            plugin.data.server.token = generateToken();
-            await plugin.persist();
-            await restartServer();
-            new Notice("New token — run Install again.");
-            refresh();
-          }),
-      );
-  });
+        },
+        regenerateToken: async () => {
+          plugin.data.server.token = generateToken();
+          await plugin.persist();
+          await restartServer();
+          new Notice("New token saved. Install again so Claude Code uses it.");
+        },
+      },
+      refresh,
+    ),
+  );
 
   writeLog("info", `claude executable: ${resolveClaude() ?? "NOT FOUND"}`);
 

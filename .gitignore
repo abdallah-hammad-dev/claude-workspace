@@ -10,3 +10,5 @@ test-vault/.obsidian/*
 !test-vault/.claude-workspace-test-vault
 test-vault/.mcp.json
 test-vault/.claude/
+tools/ui-preview/.cache/
+tools/ui-preview/out/

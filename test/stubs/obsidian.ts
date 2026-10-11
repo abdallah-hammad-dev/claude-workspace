@@ -175,3 +175,28 @@ export class MarkdownView extends FileView {
 export function debounce<T extends (...args: any[]) => any>(fn: T): T {
   return fn;
 }
+
+export class Modal {
+  constructor(public app: unknown) {}
+  open(): void {}
+  close(): void {}
+}
+export class SuggestModal<T> extends Modal {
+  setPlaceholder(_p: string): void {}
+  declare _item: T;
+}
+export function setIcon(_el: unknown, _name: string): void {}
+export function setTooltip(_el: unknown, _text: string): void {}
+export const MarkdownRenderer = { render: async () => undefined };
+export const Keymap = { isModEvent: () => false };
+export class Menu {
+  addItem(): this {
+    return this;
+  }
+  addSeparator(): this {
+    return this;
+  }
+  showAtPosition(): this {
+    return this;
+  }
+}

@@ -7,6 +7,9 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
 - `npm test` (Vitest) · `npm run lint` · `npm run typecheck` · `npm run build` (tsc + esbuild → `main.js`)
 - `npm run test:e2e` — real Claude Code CLI + real MCP host in a temp vault (Haiku, a few cents). Run after
   touching McpHost, the installer's hook format or ChatSession.
+- `npm run ui:preview [scenario…]` — renders the real chat view / settings tab in headless Chromium with
+  Obsidian's own app.css (read from the installed obsidian.asar) → `tools/ui-preview/out/*.png`, light + dark.
+  **Look at the screenshots after any UI change.** Scenarios live in `tools/ui-preview/harness.ts`.
 - `TEST_VAULT=/mnt/c/Users/abdal/Documents/cw-test-vault npm run deploy` — build + copy into a test vault.
   The script refuses non-empty folders without the `.claude-workspace-test-vault` marker.
 
@@ -21,7 +24,13 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
 - `src/core/context/` — ContextEngine (tracks last file leaf, asks providers) + pure `renderContext`.
 - `src/desktop/McpHost.ts` — node:http server: `/mcp` (MCP SDK, stateless), `/context` (hook), `/health`.
 - `src/desktop/installer-merge.ts` (pure) + `Installer.ts` — `.mcp.json`, `.claude/settings.json`, skills.
-- `src/desktop/chat/` — ChatSession (Agent SDK wrapper, no DOM), ChatView, Transcript, modals, tool-render.
+- `src/desktop/chat/` — ChatSession (Agent SDK wrapper, no DOM; `warmup()` + `initialization()` give slash
+  commands/models before the first message), ChatView (layout, composer, pickers), Transcript (messages, tool
+  rows), PromptDock (inline permission / plan / question cards), suggest (`/` and `@` popup + pure filters),
+  tool-render (icons, plain-language permission wording, diffs), modals (conversation picker).
+- `src/desktop/connection-settings.ts` — settings "Connection" section; no Node imports (preview-friendly).
+- `src/core/setting-group.ts` — Obsidian 1.11+ `SettingGroup` markup, built by hand (works on older versions).
+- `tools/ui-preview/` — browser stand-in for `obsidian` + scenarios + screenshot script (dev only).
 - `src/modules/obsidian` (core tools, required), `src/modules/markdown` (cursor/section/selection).
 - `src/core/module-api.ts` — the Module API (types only + `ToolError`). No MCP/Agent SDK types here.
 - `src/core/ModuleRegistry.ts` — loads modules, collects registrations, scoped disposal, change events.
@@ -63,6 +72,15 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   (Excalidraw availability check).
 - **Settings show module contents** via `ModuleRegistry.contentsOf(id)`, computed from live registrations
   (only for loaded modules).
+
+- **Prompts are inline cards** (PromptDock), not modals. Typing in the composer while a card is shown answers
+  it ("do this instead" → deny with message; plan → feedback; question → free-text answer). Plan approval
+  sends `updatedPermissions: setMode` (acceptEdits/default) like Claude Code.
+- **Slash commands** come from `initializationResult().commands` of a warmed-up session (process started on
+  input focus or on `/`). `/clear` is handled by the view (= new conversation); everything else passes through.
+  Messages starting with `/` don't expect hook context (local commands don't fire UserPromptSubmit).
+- **Icons**: only Lucide names that exist in Obsidian's bundled set (checked against app.js: names appear as
+  `"name":[[` or `name:[[`). The preview marks unknown icons red.
 
 ## Gotchas
 - WSL here runs in **NAT** networking mode: `claude` inside WSL cannot reach Obsidian's `127.0.0.1` server on

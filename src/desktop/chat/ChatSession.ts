@@ -2,6 +2,8 @@ import { spawn } from "node:child_process";
 import {
   query,
   type CanUseTool,
+  type ModelInfo,
+  type SlashCommand,
   type McpServerConfig,
   type PermissionMode,
   type Query,
@@ -11,6 +13,11 @@ import {
   type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages";
+
+export interface SessionInit {
+  commands: SlashCommand[];
+  models: ModelInfo[];
+}
 
 export interface ChatSessionOptions {
   cwd: string;
@@ -38,6 +45,7 @@ export class ChatSession {
   private abort: AbortController | null = null;
   private stderrTail: string[] = [];
   private closed = false;
+  private init: Promise<SessionInit | null> | null = null;
 
   constructor(private opts: ChatSessionOptions) {
     this.sessionId = opts.resume ?? null;
@@ -45,6 +53,22 @@ export class ChatSession {
 
   get running(): boolean {
     return !!this.q;
+  }
+
+  /** Start Claude Code without sending anything (commands and models become available in ~1 s). */
+  warmup(): void {
+    if (!this.closed && !this.q) this.start();
+  }
+
+  /** Slash commands and models Claude Code reported at startup; null if the process isn't running. */
+  initialization(): Promise<SessionInit | null> {
+    if (!this.q) return Promise.resolve(null);
+    const q = this.q;
+    this.init ??= q.initializationResult().then(
+      (r) => ({ commands: r.commands, models: r.models }),
+      () => null,
+    );
+    return this.init;
   }
 
   send(content: string | ContentBlockParam[]): void {
@@ -67,11 +91,6 @@ export class ChatSession {
     await this.q?.setPermissionMode(mode);
   }
 
-  /** Available after the first message (Claude Code reports them at init). */
-  async supportedModels(): Promise<{ value: string; displayName: string }[]> {
-    return this.q ? this.q.supportedModels() : [];
-  }
-
   close(): void {
     this.closed = true;
     this.input?.end();
@@ -84,6 +103,7 @@ export class ChatSession {
     const o = this.opts;
     this.input = new InputQueue();
     this.abort = new AbortController();
+    this.init = null;
     this.stderrTail = [];
     this.q = query({
       prompt: this.input,

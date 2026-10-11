@@ -39,20 +39,33 @@ Automated: `npm test` (renderer, installer merge, MCP over HTTP, auth) and `npm 
 
 ## M3/M4 — Chat view
 
-- [ ] Ribbon bot icon / "Claude Workspace: Open chat" opens the chat in the right sidebar.
-- [ ] Before install, a banner offers **Install**; after it, the banner disappears.
-- [ ] Chips under the input follow the focused note, cursor line and selection — also while the chat has focus.
-- [ ] Send "which note am I in?" → answer streams; your message shows chips + "context sent" (expand: exact block).
-- [ ] Ask Claude to edit a note (mode "Ask before edits") → permission modal with a diff; Allow once / Deny work.
-      The tool block in the transcript shows the diff and "Open file".
-- [ ] Mode "Plan" → plan modal with Approve / Keep planning.
-- [ ] Stop button (or Esc) interrupts a long answer.
-- [ ] `@` opens a file picker and inserts `@path`.
-- [ ] Paste an image → thumbnail; Claude can describe it.
-- [ ] Model and mode pickers apply mid-conversation; usage shows tokens / context window and cost.
-- [ ] History button lists sessions (including ones started with `claude` in a terminal in this vault) and resumes.
+Visual check first: `npm run ui:preview` and look at `tools/ui-preview/out/` (light + dark).
+
+- [ ] Ribbon bot icon / status-bar "✳ Claude" / "Claude Workspace: Open chat" open the chat in the right sidebar.
+- [ ] Empty state shows suggestions that match the focused view (note vs drawing); clicking one fills the input.
+- [ ] Before install, a "Connect this vault" banner offers **Install**; after it, the banner disappears.
+- [ ] The context chip in the composer follows the focused note, cursor line and selection, also while the chat
+      has focus. Clicking it previews the exact `<obsidian_context>` text.
+- [ ] Send "which note am I in?" → answer streams; your message is a tinted bubble with an eye pill under it;
+      clicking the pill shows exactly what was sent.
+- [ ] Type `/` → command list (built-ins, your skills) appears within ~1 s; arrows + Enter/Tab pick; Esc closes.
+      `/compact`, `/context`, `/cost` run; `/clear` starts a new conversation.
+- [ ] Type `@al` → file list (recent first); picking inserts `@path`.
+- [ ] Ask Claude to edit a note ("Ask before edits") → inline card above the composer: title names the file,
+      diff below, **Allow / Deny**, "Allow all edits for this conversation". Esc denies.
+- [ ] While the card is shown, type "use a bullet list instead" + Enter → denied with that message, shown as an
+      "Instead" bubble; Claude adapts.
+- [ ] Bash permission shows the command in the body and the "Always allow `cmd …` commands in this vault" option.
+- [ ] Mode "Plan" → plan card with "Yes, and accept edits" / "Yes, ask before each edit" / "Keep planning";
+      approving switches the mode button accordingly.
+- [ ] AskUserQuestion → question card with option buttons + "Something else…".
+- [ ] With the chat panel hidden, a permission request shows a notice; clicking it reveals the panel.
+- [ ] Stop button (square) or Esc interrupts a long answer; "Claude is working" dots show while busy.
+- [ ] Paste an image → thumbnail with a remove button; Claude can describe it.
+- [ ] Mode and model menus open upwards with descriptions; changes apply mid-conversation. Usage ring shows the
+      context share; tooltip shows tokens and cost.
+- [ ] History button lists conversations (including terminal ones in this vault) with relative dates and resumes.
 - [ ] Reload Obsidian → the chat reopens the same conversation.
-- [ ] `/compact`, `/cost` and other slash commands pass through.
 
 ## M2 — Excalidraw
 
@@ -74,8 +87,8 @@ Click **Install** again so the `excalidraw` skill lands in `.claude/skills/`. Cr
 
 ## Obsidian commands module + module contents in settings
 
-- [ ] Settings → Modules: each loaded module has "What it adds: …"; expanding lists tools, context, skills,
-      commands. Disabled modules say it's shown once enabled.
+- [ ] Settings: Connection status card (Claude Code / Local server / This vault) on top; each module is one card
+      with its toggle, "What it adds" (loaded modules only) and its own settings inside the card.
 - [ ] "Open today's daily note" → Claude calls `commands_list` then `commands_run` (`daily-notes:goto-today`);
       the note opens in the main area and the chat input keeps focus.
 - [ ] With a note focused and the chat focused: "make the selected text bold using the command" → applies to the note.
