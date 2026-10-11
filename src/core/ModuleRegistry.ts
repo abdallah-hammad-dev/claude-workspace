@@ -41,6 +41,7 @@ export interface ModuleInfo {
   description?: string;
   status: ModuleStatus;
   error?: string;
+  required: boolean;
 }
 
 export interface ProviderEntry {
@@ -128,6 +129,7 @@ export class ModuleRegistry {
   isEnabled(id: string): boolean {
     const entry = this.entries.get(id);
     if (!entry) return false;
+    if (entry.mod.required) return true;
     return this.host.isModuleEnabled(id) ?? entry.mod.enabledByDefault ?? true;
   }
 
@@ -140,6 +142,7 @@ export class ModuleRegistry {
       description: mod.description,
       status,
       error,
+      required: !!mod.required,
     }));
   }
 

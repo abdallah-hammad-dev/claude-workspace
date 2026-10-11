@@ -158,3 +158,17 @@ function makeEl(): any {
   };
   return el;
 }
+
+export function normalizePath(p: string): string {
+  return p.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/|\/$/g, "");
+}
+
+export class MarkdownView extends FileView {
+  getMode(): string {
+    return "source";
+  }
+}
+
+export function debounce<T extends (...args: any[]) => any>(fn: T): T {
+  return fn;
+}

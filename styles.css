@@ -1,1 +1,148 @@
-/* claude-workspace styles */
+/* claude-workspace — chat view. Uses Obsidian CSS variables so every theme works. */
+
+.cw-chat {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 0 !important;
+}
+
+.cw-header {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-1);
+  padding: var(--size-4-2) var(--size-4-3);
+  border-bottom: 1px solid var(--background-modifier-border);
+}
+.cw-title {
+  flex: 1;
+  font-weight: var(--font-semibold);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cw-banner:empty { display: none; }
+.cw-banner-row {
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  padding: var(--size-4-2) var(--size-4-3);
+  background: var(--background-modifier-error-rgb, var(--background-secondary));
+  background: rgba(var(--color-orange-rgb), 0.12);
+  font-size: var(--font-ui-small);
+}
+.cw-banner-row span { flex: 1; }
+
+.cw-messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: var(--size-4-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+  user-select: text;
+}
+
+.cw-msg { max-width: 100%; overflow-wrap: anywhere; }
+.cw-user {
+  align-self: flex-end;
+  max-width: 85%;
+  background: var(--background-secondary);
+  border-radius: var(--radius-m);
+  padding: var(--size-4-2) var(--size-4-3);
+}
+.cw-user-text { white-space: pre-wrap; }
+.cw-assistant > :first-child { margin-top: 0; }
+.cw-assistant > :last-child { margin-bottom: 0; }
+
+.cw-sent-context { display: flex; flex-wrap: wrap; gap: var(--size-4-1); margin-top: var(--size-4-1); }
+.cw-sent-context:empty { display: none; }
+.cw-context-details { width: 100%; font-size: var(--font-ui-smaller); color: var(--text-muted); }
+.cw-context-details pre { white-space: pre-wrap; max-height: 240px; overflow: auto; }
+
+.cw-chip {
+  font-size: var(--font-ui-smaller);
+  padding: 1px var(--size-4-2);
+  border-radius: var(--radius-s);
+  background: var(--background-modifier-hover);
+  color: var(--text-muted);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cw-chip-muted { opacity: 0.7; font-style: italic; }
+.cw-chip-warn { color: var(--text-warning); white-space: normal; }
+
+.cw-note { font-size: var(--font-ui-small); color: var(--text-muted); }
+.cw-note-error { color: var(--text-error); }
+.cw-note-divider { text-align: center; border-top: 1px dashed var(--background-modifier-border); padding-top: var(--size-4-1); }
+.cw-muted { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+
+.cw-thinking, .cw-tool {
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-s);
+  font-size: var(--font-ui-small);
+}
+.cw-thinking > summary, .cw-tool > summary {
+  cursor: pointer;
+  padding: var(--size-4-1) var(--size-4-2);
+  display: flex;
+  align-items: center;
+  gap: var(--size-4-2);
+  color: var(--text-muted);
+}
+.cw-thinking-body { padding: var(--size-4-2); white-space: pre-wrap; color: var(--text-muted); }
+.cw-tool-name { font-weight: var(--font-semibold); color: var(--text-normal); }
+.cw-tool-summary { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; font-family: var(--font-monospace); font-size: var(--font-ui-smaller); }
+.cw-tool-status { display: inline-flex; }
+.cw-tool-status svg { width: 14px; height: 14px; }
+.cw-tool-status.is-running svg { animation: cw-spin 1.2s linear infinite; }
+.cw-tool-status.is-done { color: var(--color-green); }
+.cw-tool-status.is-error { color: var(--text-error); }
+.cw-tool-body { padding: 0 var(--size-4-2) var(--size-4-2); }
+.cw-tool-result { max-height: 300px; overflow: auto; white-space: pre-wrap; font-size: var(--font-ui-smaller); }
+.cw-tool-result.is-error { color: var(--text-error); }
+.cw-code { white-space: pre-wrap; font-size: var(--font-ui-smaller); }
+.cw-open-file { margin-top: var(--size-4-1); font-size: var(--font-ui-smaller); }
+@keyframes cw-spin { to { transform: rotate(360deg); } }
+
+.cw-diff { font-size: var(--font-ui-smaller); max-height: 360px; overflow: auto; padding: var(--size-4-1) 0; }
+.cw-diff > div { white-space: pre-wrap; padding: 0 var(--size-4-2); }
+.cw-diff-add { background: rgba(var(--color-green-rgb), 0.15); }
+.cw-diff-del { background: rgba(var(--color-red-rgb), 0.15); }
+.cw-diff-gap { color: var(--text-faint); }
+.cw-todos { list-style: none; padding-left: 0; margin: var(--size-4-1) 0; }
+.cw-todo-completed { color: var(--text-muted); text-decoration: line-through; }
+.cw-todo-in_progress { font-weight: var(--font-semibold); }
+
+.cw-file-link { cursor: pointer; text-decoration: underline dotted; }
+
+.cw-composer {
+  border-top: 1px solid var(--background-modifier-border);
+  padding: var(--size-4-2) var(--size-4-3) var(--size-4-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--size-4-2);
+}
+.cw-chips { display: flex; flex-wrap: wrap; gap: var(--size-4-1); }
+.cw-attachments { display: flex; gap: var(--size-4-2); flex-wrap: wrap; }
+.cw-attachments:empty { display: none; }
+.cw-attachment { position: relative; }
+.cw-attachment img { height: 56px; border-radius: var(--radius-s); border: 1px solid var(--background-modifier-border); }
+.cw-attachment-remove { position: absolute; top: -6px; right: -6px; padding: 0 6px; height: auto; border-radius: 50%; font-size: 12px; }
+.cw-input { width: 100%; resize: vertical; min-height: 60px; font-family: inherit; }
+.cw-toolbar { display: flex; align-items: center; gap: var(--size-4-2); flex-wrap: wrap; }
+.cw-select { font-size: var(--font-ui-smaller); max-width: 140px; }
+.cw-usage { flex: 1; text-align: right; font-size: var(--font-ui-smaller); color: var(--text-muted); white-space: nowrap; }
+.cw-send { padding: var(--size-4-1) var(--size-4-3); }
+
+.cw-permission-summary { font-family: var(--font-monospace); font-size: var(--font-ui-small); overflow-wrap: anywhere; }
+.cw-permission-input { max-height: 50vh; overflow: auto; }
+.cw-plan { max-height: 60vh; overflow: auto; }
+.cw-question-item { margin-bottom: var(--size-4-4); }
+.cw-question-header { font-size: var(--font-ui-smaller); text-transform: uppercase; color: var(--text-muted); }
+.cw-option { display: block; width: 100%; height: auto; text-align: left; margin: var(--size-4-1) 0; padding: var(--size-4-2); white-space: normal; }
+.cw-option.is-selected { outline: 2px solid var(--interactive-accent); }
+.cw-other { width: 100%; }

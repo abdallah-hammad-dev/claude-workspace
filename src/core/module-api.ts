@@ -24,6 +24,8 @@ export interface WorkspaceModule {
   isAvailable?(app: App): boolean;
   /** Initial state of the per-module toggle in settings. Default: true. */
   enabledByDefault?: boolean;
+  /** Core modules that can't be turned off. */
+  required?: boolean;
   onload(ctx: ModuleContext): void | Promise<void>;
   onunload?(): void | Promise<void>;
 }
@@ -112,6 +114,8 @@ export interface ContextProvider {
   collect(view: View, file: TFile | null): Promise<Record<string, unknown> | null> | Record<string, unknown> | null;
   /** Lines for the `<obsidian_context>` block. Keep it short; never full file contents. */
   render?(data: Record<string, unknown>): string[];
+  /** Short label for the chat view's context chips (e.g. "L40–45 selected"). Display only. */
+  chip?(data: Record<string, unknown>): string | null;
 }
 
 export interface OpenTab {

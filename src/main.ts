@@ -1,16 +1,22 @@
 import { Platform, Plugin } from "obsidian";
+import { ContextEngine } from "./core/context/ContextEngine";
 import { createLogger } from "./core/logger";
-import type { ActiveContext, ClaudeWorkspaceApi, WorkspaceModule } from "./core/module-api";
+import type { ClaudeWorkspaceApi, WorkspaceModule } from "./core/module-api";
 import { ModuleRegistry } from "./core/ModuleRegistry";
-import { mergeData, WorkspaceSettingTab, type PluginData } from "./core/settings";
+import { mergeData, WorkspaceSettingTab, type CoreSettingsSection, type PluginData } from "./core/settings";
+import type { DesktopServices } from "./desktop";
 import { builtinModules } from "./modules";
 
 export default class ClaudeWorkspacePlugin extends Plugin {
   data!: PluginData;
   registry!: ModuleRegistry;
+  engine!: ContextEngine;
+  /** Server, installer and chat view. Null on mobile. */
+  desktop: DesktopServices | null = null;
+  coreSettingsSections: CoreSettingsSection[] = [];
   /** Public API for other plugins: `app.plugins.plugins["claude-workspace"].api`. */
   api!: ClaudeWorkspaceApi;
-  private readonly log = createLogger("core", () => this.data?.debug ?? false);
+  readonly log = createLogger("core", () => this.data?.debug ?? false);
 
   override async onload(): Promise<void> {
     this.data = mergeData(await this.loadData());
@@ -30,8 +36,10 @@ export default class ClaudeWorkspacePlugin extends Plugin {
         this.data.modules[id] = { ...this.data.modules[id], data };
         await this.persist();
       },
-      getActiveContext: () => this.getActiveContext(),
+      getActiveContext: () => this.engine.collect(),
     });
+    this.engine = new ContextEngine(this.app, this.registry, createLogger("context", () => this.data.debug));
+    this.engine.attach(this);
 
     this.api = {
       version: 1,
@@ -41,6 +49,12 @@ export default class ClaudeWorkspacePlugin extends Plugin {
     for (const mod of builtinModules) this.registry.add(mod);
     this.addSettingTab(new WorkspaceSettingTab(this.app, this));
 
+    // Node-only code lives behind a dynamic import so the bundle still loads on mobile.
+    if (Platform.isDesktopApp) {
+      const { startDesktop } = await import("./desktop");
+      this.desktop = await startDesktop(this);
+    }
+
     // Modules may depend on other plugins (Excalidraw), which load in any order.
     this.app.workspace.onLayoutReady(() => {
       void this.registry.start().then(() => this.log.debug("modules started"));
@@ -48,20 +62,11 @@ export default class ClaudeWorkspacePlugin extends Plugin {
   }
 
   override onunload(): void {
+    void this.desktop?.dispose();
     void this.registry.stop();
   }
 
   async persist(): Promise<void> {
     await this.saveData(this.data);
-  }
-
-  /** Placeholder until the ContextEngine lands in M1. */
-  private getActiveContext(): Promise<ActiveContext> {
-    const file = this.app.workspace.getActiveFile();
-    return Promise.resolve({
-      activeFile: file ? { path: file.path, viewType: "unknown" } : null,
-      providers: {},
-      openTabs: [],
-    });
   }
 }
