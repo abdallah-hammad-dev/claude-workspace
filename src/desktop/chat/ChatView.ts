@@ -73,7 +73,7 @@ export class ChatView extends ItemView {
   private session: ChatSession | null = null;
   private transcript!: Transcript;
   private bannerEl!: HTMLElement;
-  private titleEl!: HTMLElement;
+  private headerTitleEl!: HTMLElement;
   private chipsEl!: HTMLElement;
   private attachmentsEl!: HTMLElement;
   private input!: HTMLTextAreaElement;
@@ -138,7 +138,7 @@ export class ChatView extends ItemView {
     root.addClass("cw-chat");
 
     const header = root.createDiv({ cls: "cw-header" });
-    this.titleEl = header.createDiv({ cls: "cw-title", text: "New conversation" });
+    this.headerTitleEl = header.createDiv({ cls: "cw-title", text: "New conversation" });
     this.iconButton(header, "history", "Resume a conversation", () => void this.pickSession());
     this.iconButton(header, "square-pen", "New conversation", () => this.newConversation());
 
@@ -300,7 +300,7 @@ export class ChatView extends ItemView {
   }
 
   private onInit(m: SDKSystemMessage): void {
-    this.titleEl.setText(this.titleEl.getText() === "New conversation" ? "Conversation" : this.titleEl.getText());
+    this.headerTitleEl.setText(this.headerTitleEl.getText() === "New conversation" ? "Conversation" : this.headerTitleEl.getText());
     const obsidian = m.mcp_servers.find((s) => s.name === "obsidian");
     if (!obsidian) this.transcript.addNote("The Obsidian MCP server isn't connected; Obsidian tools are unavailable.", "error");
     else if (obsidian.status !== "connected") {
@@ -381,7 +381,7 @@ export class ChatView extends ItemView {
     this.resumeId = null;
     this.pendingBubble = null;
     this.transcript.clear();
-    this.titleEl.setText("New conversation");
+    this.headerTitleEl.setText("New conversation");
     this.lastContextTokens = 0;
     this.costUsd = 0;
     this.updateUsage();
@@ -409,7 +409,7 @@ export class ChatView extends ItemView {
   private async resume(sessionId: string, title?: string): Promise<void> {
     this.newConversation();
     this.resumeId = sessionId;
-    this.titleEl.setText(title ?? "Resumed conversation");
+    this.headerTitleEl.setText(title ?? "Resumed conversation");
     try {
       const messages = await getSessionMessages(sessionId, { dir: this.host.vaultPath });
       for (const m of messages) this.transcript.renderHistoryMessage(m);

@@ -71,3 +71,7 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   we kill on abort manually. Windows: spawn `claude.exe` or `cli.js`, never npm `.cmd` shims.
 - The HTTP hook fails "open" (default `onFailure: continue`): with Obsidian closed, terminal prompts still go
   through, just without context.
+- **Never declare class fields that shadow Obsidian base-class members** (`titleEl`, `contentEl`, `containerEl`,
+  `headerEl`, `icon`, `navigation`, `scope`, `modalEl`, `inputEl`…). With ES2022 define-semantics they reset the
+  base value to undefined after `super()`; `ChatView.titleEl` did exactly that and Obsidian's header update threw
+  before `onOpen` ran (blank panel, no error in our log). tsconfig now has `useDefineForClassFields: false` too.
