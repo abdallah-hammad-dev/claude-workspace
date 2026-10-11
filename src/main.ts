@@ -37,6 +37,8 @@ export default class ClaudeWorkspacePlugin extends Plugin {
         await this.persist();
       },
       getActiveContext: () => this.engine.collect(),
+      getActiveView: () => this.engine.currentLeaf()?.view ?? null,
+      notifyContextChanged: () => this.engine.notifyChanged(),
     });
     this.engine = new ContextEngine(this.app, this.registry, createLogger("context", () => this.data.debug));
     this.engine.attach(this);

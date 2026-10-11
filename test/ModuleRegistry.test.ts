@@ -26,6 +26,8 @@ function setup(opts: { platform?: "desktop" | "mobile"; enabled?: Record<string,
       return Promise.resolve();
     },
     getActiveContext: () => Promise.resolve({ activeFile: null, providers: {}, openTabs: [] }),
+    getActiveView: () => null,
+    notifyContextChanged: () => undefined,
   };
   return { registry: new ModuleRegistry(host), app, plugin, enabled, data };
 }

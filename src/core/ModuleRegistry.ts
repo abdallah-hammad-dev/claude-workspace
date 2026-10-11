@@ -1,4 +1,4 @@
-import { ItemView, type App, type Plugin, type ViewCreator, type WorkspaceLeaf } from "obsidian";
+import { ItemView, type App, type Plugin, type View, type ViewCreator, type WorkspaceLeaf } from "obsidian";
 import type { ZodRawShape } from "zod";
 import { createLogger } from "./logger";
 import type {
@@ -25,6 +25,8 @@ export interface RegistryHost {
   loadModuleData(id: string): object | undefined;
   saveModuleData(id: string, data: object): Promise<void>;
   getActiveContext(): Promise<ActiveContext>;
+  getActiveView(): View | null;
+  notifyContextChanged(): void;
 }
 
 export type ModuleStatus =
@@ -332,6 +334,8 @@ export class ModuleRegistry {
 
       onDispose: own,
       getActiveContext: () => host.getActiveContext(),
+      getActiveView: () => host.getActiveView(),
+      notifyContextChanged: () => host.notifyContextChanged(),
       loadData: <T extends object>(defaults: T): T => ({ ...defaults, ...(host.loadModuleData(moduleId) ?? {}) }),
       saveData: (data) => host.saveModuleData(moduleId, data),
     };

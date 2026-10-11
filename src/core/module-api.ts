@@ -46,6 +46,10 @@ export interface ModuleContext {
   /** Any extra cleanup to run when the module is disabled. */
   onDispose(fn: Disposer): void;
   getActiveContext(): Promise<ActiveContext>;
+  /** The view the user is working in (last focused file view; the chat or side panels don't count). */
+  getActiveView(): View | null;
+  /** Ask for the context to be re-collected (for selection models Obsidian doesn't report, e.g. Excalidraw). */
+  notifyContextChanged(): void;
   /** Per-module persisted settings, stored under `modules.<id>.data` in plugin data. */
   loadData<T extends object>(defaults: T): T;
   saveData(data: object): Promise<void>;

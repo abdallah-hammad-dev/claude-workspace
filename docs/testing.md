@@ -53,3 +53,21 @@ Automated: `npm test` (renderer, installer merge, MCP over HTTP, auth) and `npm 
 - [ ] History button lists sessions (including ones started with `claude` in a terminal in this vault) and resumes.
 - [ ] Reload Obsidian → the chat reopens the same conversation.
 - [ ] `/compact`, `/cost` and other slash commands pass through.
+
+## M2 — Excalidraw
+
+Setup: in the test vault install + enable the **Excalidraw** community plugin, then Settings → Claude Workspace →
+Modules shows *Excalidraw* loaded (if it says "unavailable", reload the plugin after enabling Excalidraw).
+Click **Install** again so the `excalidraw` skill lands in `.claude/skills/`. Create a drawing (`Ctrl+P` →
+"Excalidraw: Create new drawing").
+
+- [ ] With the drawing focused, chips show "N elements"; select two shapes → "2 elements selected" (within ~1 s).
+- [ ] "What did I select?" → Claude describes the selected shapes from the context, without reading the file.
+- [ ] "Draw a three-box architecture: Browser → API → Database" → shapes + labelled arrows appear live, in one batch.
+- [ ] Ctrl+Z in Excalidraw undoes the whole batch in one step (**verify — if it takes several steps, note it in CLAUDE.md**).
+- [ ] "Make the selected box red and rename it Gateway" → label changes and stays centered.
+- [ ] "Delete the database" → the shape, its label and attached arrows disappear.
+- [ ] Claude takes `excalidraw_screenshot` after a bigger edit (image appears in the tool block result as `[image]`).
+- [ ] "Show me the API box" → it gets selected and zoomed (`excalidraw_focus`).
+- [ ] Ask for an impossible edit (unknown id) → tool error lists the problem, drawing unchanged.
+- [ ] The `.excalidraw.md` file is never edited directly by Claude while the drawing is open.
