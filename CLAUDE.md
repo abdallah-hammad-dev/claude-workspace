@@ -57,7 +57,12 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
 - **Bundling the Agent SDK into the renderer** (see `esbuild.config.mjs` banner): module-scope shims for
   `setTimeout`/`setInterval` handles with `.unref()`, and `import.meta.url` → `__cwImportMetaUrl`. Desktop
   code is only reached through `await import("./desktop")`, which esbuild turns into lazy init, so the bundle
-  loads on mobile (checked by loading main.js with a require that only knows `obsidian`).
+  loads on mobile — check with `npm run check:mobile` after a build.
+- **Undocumented Obsidian APIs** are isolated in one adapter file each and make their module "unavailable"
+  if missing: `app.commands` (commands module, `src/modules/commands/registry.ts`), `app.plugins.plugins`
+  (Excalidraw availability check).
+- **Settings show module contents** via `ModuleRegistry.contentsOf(id)`, computed from live registrations
+  (only for loaded modules).
 
 ## Gotchas
 - WSL here runs in **NAT** networking mode: `claude` inside WSL cannot reach Obsidian's `127.0.0.1` server on

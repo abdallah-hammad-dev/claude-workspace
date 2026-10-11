@@ -71,3 +71,13 @@ Click **Install** again so the `excalidraw` skill lands in `.claude/skills/`. Cr
 - [ ] "Show me the API box" → it gets selected and zoomed (`excalidraw_focus`).
 - [ ] Ask for an impossible edit (unknown id) → tool error lists the problem, drawing unchanged.
 - [ ] The `.excalidraw.md` file is never edited directly by Claude while the drawing is open.
+
+## Obsidian commands module + module contents in settings
+
+- [ ] Settings → Modules: each loaded module has "What it adds: …"; expanding lists tools, context, skills,
+      commands. Disabled modules say it's shown once enabled.
+- [ ] "Open today's daily note" → Claude calls `commands_list` then `commands_run` (`daily-notes:goto-today`);
+      the note opens in the main area and the chat input keeps focus.
+- [ ] With a note focused and the chat focused: "make the selected text bold using the command" → applies to the note.
+- [ ] Editor command while a drawing is focused → `ran: false`, Claude explains instead of retrying.
+- [ ] "Reload Obsidian" → refused (blocked); edit the blocklist in settings and it takes effect immediately.

@@ -12,7 +12,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "vitest run --config vitest.e2e.config.ts"
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "check:mobile": "node scripts/check-mobile-load.cjs main.js"
   },
   "author": "Abdallah Hammad",
   "license": "MIT",

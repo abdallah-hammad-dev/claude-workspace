@@ -46,6 +46,16 @@ export interface ModuleInfo {
   required: boolean;
 }
 
+/** What a loaded module added, for the settings page. */
+export interface ModuleContents {
+  tools: { name: string; description: string; readOnly: boolean }[];
+  contextProviders: { id: string; viewTypes: string[] }[];
+  skills: string[];
+  commands: string[];
+  views: string[];
+  settings: string[];
+}
+
 export interface ProviderEntry {
   moduleId: string;
   /** `${moduleId}.${provider.id}` */
@@ -72,6 +82,7 @@ export class ModuleRegistry {
   private readonly sections: { moduleId: string; section: SettingsSection }[] = [];
   private readonly skills = new Map<string, { moduleId: string; skill: SkillDef }>();
   private readonly viewFactories = new Map<string, { moduleId: string; factory: ViewCreator }>();
+  private readonly commands = new Map<string, { moduleId: string; name: string }>();
   /** View types registered with Obsidian. Obsidian can't unregister them, so we keep a trampoline. */
   private readonly obsidianViewTypes = new Set<string>();
   private readonly listeners = new Set<(change: RegistryChange) => void>();
@@ -188,6 +199,23 @@ export class ModuleRegistry {
 
   getSettingsSections(): { moduleId: string; section: SettingsSection }[] {
     return [...this.sections];
+  }
+
+  /** Everything a module currently has registered (empty unless it is loaded). */
+  contentsOf(moduleId: string): ModuleContents {
+    const mine = <T extends { moduleId: string }>(xs: Iterable<T>) => [...xs].filter((x) => x.moduleId === moduleId);
+    return {
+      tools: mine(this.tools.values()).map(({ def }) => ({
+        name: def.name,
+        description: def.description,
+        readOnly: def.annotations?.readOnlyHint === true,
+      })),
+      contextProviders: mine(this.providers).map((p) => ({ id: p.provider.id, viewTypes: p.provider.viewTypes })),
+      skills: mine(this.skills.values()).map((s) => s.skill.name),
+      commands: mine(this.commands.values()).map((c) => c.name),
+      views: [...this.viewFactories].filter(([, v]) => v.moduleId === moduleId).map(([type]) => type),
+      settings: mine(this.sections).map((s) => s.section.title),
+    };
   }
 
   onChange(fn: (change: RegistryChange) => void): Disposer {
@@ -322,7 +350,11 @@ export class ModuleRegistry {
       registerCommand: (cmd) => {
         const id = `${moduleId}-${cmd.id}`;
         host.plugin.addCommand({ ...cmd, id });
-        own(() => host.plugin.removeCommand(id));
+        this.commands.set(id, { moduleId, name: cmd.name });
+        own(() => {
+          host.plugin.removeCommand(id);
+          this.commands.delete(id);
+        });
       },
 
       registerSettings: (section) => {

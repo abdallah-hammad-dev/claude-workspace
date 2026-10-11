@@ -128,6 +128,9 @@ export class Setting {
   addText(): this {
     return this;
   }
+  addTextArea(): this {
+    return this;
+  }
   addToggle(): this {
     return this;
   }

@@ -257,3 +257,21 @@ describe("retryUnavailable", () => {
     expect(registry.getTools()).toHaveLength(1);
   });
 });
+
+describe("contentsOf", () => {
+  it("lists what a loaded module registered, and nothing once disabled", async () => {
+    const { registry } = setup();
+    registry.add(fullModule());
+    await registry.start();
+    expect(registry.contentsOf("demo")).toEqual({
+      tools: [{ name: "demo_ping", description: "ping", readOnly: false }],
+      contextProviders: [{ id: "p", viewTypes: ["markdown"] }],
+      skills: ["demo-skill"],
+      commands: ["Cmd"],
+      views: ["demo-view"],
+      settings: ["demo"],
+    });
+    await registry.setEnabled("demo", false);
+    expect(registry.contentsOf("demo")).toEqual({ tools: [], contextProviders: [], skills: [], commands: [], views: [], settings: [] });
+  });
+});

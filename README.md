@@ -40,6 +40,7 @@ Obsidian ── plugin ── 127.0.0.1:<port>/mcp      MCP server (tools from m
 |---|---|
 | `obsidian_get_active_context` | Structured version of the context block |
 | `obsidian_open_file` | Open a vault file (optionally at a line) |
+| `commands_list` / `commands_run` | Search and run any command-palette command (core + plugins), with a blocklist |
 | `excalidraw_get_scene` | Live elements of the open drawing (labels merged, bindings, selection) |
 | `excalidraw_apply` | Batch of add_shape / add_text / connect / update / delete, validated before applying |
 | `excalidraw_screenshot` | PNG of the live drawing |
