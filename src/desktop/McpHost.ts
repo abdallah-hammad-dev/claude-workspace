@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
-import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { ToolError, type ActiveContext, type Logger, type RegisteredTool, type ToolResult } from "../core/module-api";
 import { checkRequest } from "./http-guard";
@@ -142,14 +142,27 @@ export class McpHost {
       return sendJson(res, 400, { jsonrpc: "2.0", error: { code: -32700, message: "Parse error" }, id: null });
     }
 
+    // Web-standard transport + our own Node<->fetch bridge: avoids @hono/node-server, which
+    // patches globals and isn't meant for Electron's renderer.
     const server = this.buildServer();
-    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
-    res.on("close", () => {
+    const transport = new WebStandardStreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    try {
+      await server.connect(transport);
+      const headers = new Headers();
+      for (const [k, v] of Object.entries(req.headers)) {
+        if (typeof v === "string") headers.set(k, v);
+        else if (Array.isArray(v)) headers.set(k, v.join(", "));
+      }
+      const request = new Request(`http://${req.headers.host ?? "127.0.0.1"}${req.url ?? "/mcp"}`, { method: "POST", headers });
+      const response = await transport.handleRequest(request, { parsedBody: body });
+      const out: Record<string, string> = {};
+      response.headers.forEach((v, k) => (out[k] = v));
+      res.writeHead(response.status, out);
+      res.end(Buffer.from(await response.arrayBuffer()));
+    } finally {
       void transport.close();
       void server.close();
-    });
-    await server.connect(transport);
-    await transport.handleRequest(req, res, body);
+    }
   }
 
   private buildServer(): McpServer {
