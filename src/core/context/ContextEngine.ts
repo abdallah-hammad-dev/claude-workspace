@@ -51,7 +51,7 @@ export class ContextEngine {
   /** The leaf the user is working in, or null. */
   currentLeaf(): WorkspaceLeaf | null {
     const leaf = this.lastLeaf;
-    if (leaf && fileOf(leaf.view) && leaf.view.containerEl.isConnected) return leaf;
+    if (leaf && this.isEditorLeaf(leaf) && leaf.view.containerEl.isConnected) return leaf;
     const active = this.app.workspace.getActiveFile();
     let found: WorkspaceLeaf | null = null;
     this.app.workspace.iterateRootLeaves((l) => {
@@ -96,6 +96,16 @@ export class ContextEngine {
     return { ctx, text: this.render(ctx) };
   }
 
+  /**
+   * A tab in the main area (or a popout window) showing a file. Side panels such as
+   * Outline or Backlinks also carry a `file`, but they describe the note, they aren't it.
+   */
+  private isEditorLeaf(leaf: WorkspaceLeaf): boolean {
+    if (!fileOf(leaf.view)) return false;
+    const root = leaf.getRoot();
+    return root !== this.app.workspace.leftSplit && root !== this.app.workspace.rightSplit;
+  }
+
   private openTabs(): OpenTab[] {
     const tabs: OpenTab[] = [];
     this.app.workspace.iterateRootLeaves((l) => {
@@ -106,14 +116,14 @@ export class ContextEngine {
   }
 
   private track(leaf: WorkspaceLeaf | null): void {
-    if (leaf && fileOf(leaf.view)) this.lastLeaf = leaf;
+    if (leaf && this.isEditorLeaf(leaf)) this.lastLeaf = leaf;
     this.notifySoon();
   }
 
   /** `file-open` also fires for files opened by tools while focus stays in the chat. */
   private trackFile(file: TFile): void {
     const active = this.app.workspace.getMostRecentLeaf();
-    if (active && fileOf(active.view) === file) {
+    if (active && fileOf(active.view) === file && this.isEditorLeaf(active)) {
       this.lastLeaf = active;
     } else {
       this.app.workspace.iterateRootLeaves((l) => {

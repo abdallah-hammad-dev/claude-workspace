@@ -119,6 +119,20 @@ export class ChatView extends ItemView {
   }
 
   override async onOpen(): Promise<void> {
+    try {
+      this.build();
+    } catch (e) {
+      // Never leave a blank panel: show what broke (also written to debug.log).
+      this.host.log.error("chat view failed to open", e);
+      this.contentEl.empty();
+      const box = this.contentEl.createDiv({ cls: "cw-fatal" });
+      box.createEl("h4", { text: "The Claude chat panel failed to load" });
+      box.createEl("pre", { text: e instanceof Error ? `${e.message}\n\n${e.stack ?? ""}` : String(e) });
+      box.createEl("p", { text: "This is a bug in the Claude Workspace plugin, not in Obsidian. The details are also in .obsidian/plugins/claude-workspace/debug.log." });
+    }
+  }
+
+  private build(): void {
     const root = this.contentEl;
     root.empty();
     root.addClass("cw-chat");

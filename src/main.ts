@@ -1,4 +1,4 @@
-import { Platform, Plugin } from "obsidian";
+import { Notice, Platform, Plugin } from "obsidian";
 import { ContextEngine } from "./core/context/ContextEngine";
 import { createLogger } from "./core/logger";
 import type { ClaudeWorkspaceApi, WorkspaceModule } from "./core/module-api";
@@ -53,8 +53,13 @@ export default class ClaudeWorkspacePlugin extends Plugin {
 
     // Node-only code lives behind a dynamic import so the bundle still loads on mobile.
     if (Platform.isDesktopApp) {
-      const { startDesktop } = await import("./desktop");
-      this.desktop = await startDesktop(this);
+      try {
+        const { startDesktop } = await import("./desktop");
+        this.desktop = await startDesktop(this);
+      } catch (e) {
+        this.log.error("desktop features failed to start", e);
+        new Notice(`Claude Workspace: failed to start (${e instanceof Error ? e.message : String(e)}). See the developer console.`, 15000);
+      }
     }
 
     // Modules may depend on other plugins (Excalidraw), which load in any order.

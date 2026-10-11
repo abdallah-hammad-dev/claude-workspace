@@ -1,9 +1,10 @@
-import { existsSync, statSync } from "node:fs";
+import { appendFileSync, existsSync, statSync } from "node:fs";
+import { join } from "node:path";
 import { homedir } from "node:os";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
 import { Notice, Setting } from "obsidian";
 import { vaultBasePath } from "../core/paths";
-import { createLogger } from "../core/logger";
+import { createLogger, setLogSink } from "../core/logger";
 import type ClaudeWorkspacePlugin from "../main";
 import { CHAT_VIEW_TYPE, ChatView, type ChatHost } from "./chat/ChatView";
 import { enhancedPath, locateClaude } from "./claude-binary";
@@ -20,8 +21,29 @@ export interface DesktopServices {
 /** Everything that needs Node: local server, installer, chat view. */
 export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<DesktopServices> {
   const { app } = plugin;
-  const log = createLogger("desktop", () => plugin.data.debug);
   const vaultPath = vaultBasePath(app) ?? "";
+
+  // Warnings and errors also go to <vault>/.obsidian/plugins/claude-workspace/debug.log (no tokens, no note text).
+  const logFile = join(vaultPath, app.vault.configDir, "plugins", plugin.manifest.id, "debug.log");
+  const writeLog = (level: string, line: string) => {
+    try {
+      appendFileSync(logFile, `${new Date().toISOString()} ${level.toUpperCase()} ${line}\n`);
+    } catch {
+      // logging must never break the plugin
+    }
+  };
+  setLogSink(writeLog);
+  writeLog("info", `plugin ${plugin.manifest.version} starting on ${process.platform}`);
+  // Uncaught errors coming from our code (stack frames are tagged plugin:claude-workspace).
+  plugin.registerDomEvent(window, "error", (e: ErrorEvent) => {
+    const stack = e.error instanceof Error ? (e.error.stack ?? "") : "";
+    if (stack.includes(plugin.manifest.id)) writeLog("error", `uncaught: ${e.message}\n${stack}`);
+  });
+  plugin.registerDomEvent(window, "unhandledrejection", (e: PromiseRejectionEvent) => {
+    const r: unknown = e.reason;
+    const stack = r instanceof Error ? (r.stack ?? "") : "";
+    if (stack.includes(plugin.manifest.id)) writeLog("error", `unhandled rejection: ${r instanceof Error ? r.message : String(r)}\n${stack}`);
+  });
 
   if (!plugin.data.server.token) {
     plugin.data.server.token = generateToken();
@@ -45,7 +67,7 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
     host.update({ port: port(), token: plugin.data.server.token });
     const state = await host.start();
     if (state.status === "error") new Notice(`Claude Workspace: ${state.message}. Change the port in settings.`, 10000);
-    else if (state.status === "listening") log.debug(`listening on 127.0.0.1:${state.port}`);
+    else if (state.status === "listening") writeLog("info", `server listening on 127.0.0.1:${state.port}`);
   };
   await restartServer();
 
@@ -228,9 +250,12 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
       );
   });
 
+  writeLog("info", `claude executable: ${resolveClaude() ?? "NOT FOUND"}`);
+
   return {
     host,
     dispose: async () => {
+      setLogSink(null);
       await host.stop();
     },
   };

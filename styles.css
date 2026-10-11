@@ -146,3 +146,5 @@
 .cw-option { display: block; width: 100%; height: auto; text-align: left; margin: var(--size-4-1) 0; padding: var(--size-4-2); white-space: normal; }
 .cw-option.is-selected { outline: 2px solid var(--interactive-accent); }
 .cw-other { width: 100%; }
+.cw-fatal { padding: var(--size-4-4); user-select: text; }
+.cw-fatal pre { white-space: pre-wrap; font-size: var(--font-ui-smaller); color: var(--text-error); }
