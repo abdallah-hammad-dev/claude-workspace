@@ -171,7 +171,10 @@ describe.skipIf(!claudePath)("chat e2e (real Claude Code)", () => {
     const ask = "Run `echo effort=$CLAUDE_EFFORT` with the Bash tool and reply with its output only.";
     session.send(ask);
     expect(finalText(await runTurn(session, messages))).toContain("effort=low");
+    // Undocumented getSettings(): if this fails, the footer silently falls back to "Default".
+    expect(await session.applied()).toMatchObject({ model: expect.stringContaining("sonnet"), effort: "low" });
     await session.setEffort("high");
+    expect((await session.applied())?.effort).toBe("high");
     session.send(ask);
     expect(finalText(await runTurn(session, messages))).toContain("effort=high");
     session.close();

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseApplied, readAppliedSettings } from "../src/desktop/chat/applied-settings";
 import { parseLocalCommand } from "../src/desktop/chat/local-commands";
 import { relativeTime } from "../src/desktop/chat/modals";
 import { argChoices, argQuery, filterCommands, filterFiles, mentionQuery, slashQuery } from "../src/desktop/chat/suggest";
@@ -139,6 +140,21 @@ describe("permission wording", () => {
   it("makes paths vault-relative", () => {
     expect(relPath("c:\\users\\me\\vault\\A.md", VAULT)).toBe("A.md");
     expect(relPath("/etc/hosts", VAULT)).toBe("/etc/hosts");
+  });
+});
+
+describe("applied settings (undocumented getSettings)", () => {
+  it("reads the model and effort Claude Code really uses", async () => {
+    const q = { getSettings: async () => ({ effective: {}, applied: { model: "claude-opus-5-5", effort: "xhigh", advisor: null } }) };
+    expect(await readAppliedSettings(q)).toEqual({ model: "claude-opus-5-5", effort: "xhigh" });
+    expect(parseApplied({ applied: { model: "claude-haiku-4-5", effort: null } })).toEqual({ model: "claude-haiku-4-5", effort: null });
+  });
+
+  it("degrades to null or drops unknown values when the internal API changes", async () => {
+    expect(await readAppliedSettings({})).toBeNull();
+    expect(await readAppliedSettings({ getSettings: async () => { throw new Error("unknown control request"); } })).toBeNull();
+    expect(parseApplied({ effective: {} })).toBeNull();
+    expect(parseApplied({ applied: { model: 42, effort: "turbo" } })).toEqual({});
   });
 });
 

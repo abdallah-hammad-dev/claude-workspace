@@ -287,6 +287,11 @@ async function renderChat(): Promise<void> {
       view.setBusy(false);
       view.modeBtn.click();
       break;
+    case "chat-defaults":
+      view.warm();
+      await tick(100);
+      view.effortBtn.click();
+      break;
     case "chat-effort-menu":
       view.warm();
       await tick(50);

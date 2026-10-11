@@ -16,6 +16,7 @@ import type { ActiveContext, Disposer, Logger } from "../../core/module-api";
 import type { ModuleRegistry } from "../../core/ModuleRegistry";
 import type { ChatPrefs, EffortLevel } from "../../core/settings";
 import type { HostState, ServedContext } from "../McpHost";
+import type { AppliedSettings } from "./applied-settings";
 import { ChatSession } from "./ChatSession";
 import { EFFORTS, parseLocalCommand } from "./local-commands";
 import { SessionPickerModal, sessionTitle } from "./modals";
@@ -48,6 +49,8 @@ interface ModelChoice {
   desc: string;
   /** Effort levels the model accepts; [] = no effort control, undefined = unknown. */
   efforts?: EffortLevel[];
+  /** Wire model id the row resolves to ("default" → "claude-opus-5-5"). */
+  resolved?: string;
 }
 
 const FALLBACK_MODELS: ModelChoice[] = [
@@ -115,6 +118,8 @@ export class ChatView extends ItemView {
   private costUsd = 0;
   private models: ModelChoice[] = FALLBACK_MODELS;
   private commands: SlashCommand[] | null = null;
+  /** What the running session really uses; fills in what "Default" means. */
+  private applied: AppliedSettings | null = null;
   private lastCtx: ActiveContext | null = null;
   private disposers: Disposer[] = [];
 
@@ -337,6 +342,17 @@ export class ChatView extends ItemView {
       this.updateModelButton();
       this.updateEffortButton();
       if (this.suggest.isOpen) this.onInput();
+      this.refreshApplied();
+    });
+  }
+
+  private refreshApplied(): void {
+    const session = this.session;
+    void session?.applied().then((a) => {
+      if (session !== this.session || !a) return;
+      this.applied = a;
+      this.updateModelButton();
+      this.updateEffortButton();
     });
   }
 
@@ -450,6 +466,8 @@ export class ChatView extends ItemView {
     this.pendingBubbles = this.pendingBubbles.filter((b) => !b.hasContext);
     this.setBusy(false);
     this.updateUsage();
+    // A command like /config may have changed the model or effort.
+    this.refreshApplied();
   }
 
   private onSessionEnd(err?: Error): void {
@@ -623,20 +641,31 @@ export class ChatView extends ItemView {
 
   private async changeModel(model: string): Promise<void> {
     await this.host.savePrefs({ model });
+    // The default effort depends on the model: forget the old one until the session reports again.
+    this.applied = null;
     this.updateModelButton();
     this.updateEffortButton();
     await this.session?.setModel(model || undefined);
+    this.refreshApplied();
   }
 
   private updateModelButton(): void {
     const value = this.host.prefs().model;
     const m = this.models.find((x) => x.value === value);
     this.modelBtn.empty();
-    // "Default (recommended)" is too long for a narrow panel; the menu keeps the full name.
-    const label = (m?.label ?? (value || "Default")).replace(/\s*\(recommended\)$/i, "");
+    // "Default" alone says nothing: name the model it stands for (the menu keeps "Default (recommended)").
+    const named = value === "" ? this.defaultModelName() : null;
+    const label = named ?? (m?.label ?? (value || "Default")).replace(/\s*\(recommended\)$/i, "");
     this.modelBtn.createSpan({ cls: "cw-footer-label", text: label });
     setIcon(this.modelBtn.createSpan({ cls: "cw-footer-chevron" }), "chevron-down");
-    setTooltip(this.modelBtn, "Model", { placement: "top" });
+    setTooltip(this.modelBtn, named ? `Model: ${named} (Claude Code's default)` : "Model", { placement: "top" });
+  }
+
+  /** "Opus 5.5" for the default row, from the alias row that resolves to the same model. */
+  private defaultModelName(): string | null {
+    const resolved = this.models.find((m) => m.value === "")?.resolved;
+    if (!resolved) return null;
+    return this.models.find((m) => m.value !== "" && m.resolved === resolved)?.label ?? null;
   }
 
   /** Levels the selected model accepts (all of them while Claude Code hasn't said). */
@@ -651,7 +680,7 @@ export class ChatView extends ItemView {
     const menu = new Menu();
     menu.addItem((item) =>
       item
-        .setTitle(menuLabel("Default", "The model's usual level"))
+        .setTitle(menuLabel("Default", this.defaultEffortLabel() ? `Currently ${this.defaultEffortLabel()}` : "The model's usual level"))
         .setChecked(current === "")
         .onClick(() => void this.changeEffort("")),
     );
@@ -671,6 +700,12 @@ export class ChatView extends ItemView {
     await this.host.savePrefs({ effort });
     this.updateEffortButton();
     await this.session?.setEffort(effort || undefined);
+    this.refreshApplied();
+  }
+
+  /** The level "Default" currently means (your saved /effort or the model's own), if the session said. */
+  private defaultEffortLabel(): string | null {
+    return EFFORTS.find((e) => e.value === this.applied?.effort)?.label ?? null;
   }
 
   private updateEffortButton(): void {
@@ -678,15 +713,18 @@ export class ChatView extends ItemView {
     const supported = this.models.find((m) => m.value === this.host.prefs().model)?.efforts;
     btn.toggle(!supported || supported.length > 0);
     const current = EFFORTS.find((e) => e.value === this.host.prefs().effort);
+    const byDefault = current ? null : this.defaultEffortLabel();
     btn.empty();
     setIcon(btn.createSpan({ cls: "cw-footer-icon" }), "brain");
-    if (current) btn.createSpan({ cls: "cw-footer-label", text: current.label });
+    if (current || byDefault) btn.createSpan({ cls: "cw-footer-label", text: current?.label ?? byDefault ?? "" });
     const capped = current && supported && !supported.includes(current.value);
     setTooltip(
       btn,
       current
         ? `Effort: ${current.label}${capped ? " (not supported by this model; Claude Code lowers it)" : ""}`
-        : "Effort: default for this model. Click to think harder or answer faster.",
+        : byDefault
+          ? `Effort: ${byDefault} (Claude Code's default for this model). Click to change.`
+          : "Effort: default for this model. Click to think harder or answer faster.",
       { placement: "top" },
     );
   }
@@ -774,7 +812,7 @@ export class ChatView extends ItemView {
     let choices: { value: string; description?: string }[];
     let current: string | undefined;
     if (command === "effort") {
-      choices = [...this.effortLevels().map((e) => ({ value: e.value, description: e.desc })), { value: "auto", description: "The model's usual level" }];
+      choices = [...this.effortLevels().map((e) => ({ value: e.value, description: e.desc })), { value: "auto", description: this.defaultEffortLabel() ? `Default, currently ${this.defaultEffortLabel()}` : "The model's usual level" }];
       current = prefs.effort || "auto";
     } else if (command === "model") {
       choices = this.models.map((m) => ({ value: m.value || "default", description: m.desc || m.label }));
@@ -1016,7 +1054,7 @@ function toModelChoices(models: ModelInfo[]): ModelChoice[] {
     if (out.some((x) => x.value === value)) continue;
     // Models without effort control (e.g. Haiku 4.5) report neither field.
     const efforts = m.supportsEffort || m.supportedEffortLevels ? (m.supportedEffortLevels ?? EFFORTS.map((e) => e.value)) : [];
-    out.push({ value, label: m.displayName || m.value, desc: m.description ?? "", efforts });
+    out.push({ value, label: m.displayName || m.value, desc: m.description ?? "", efforts, resolved: m.resolvedModel });
   }
   if (!out.some((x) => x.value === "")) out.unshift(FALLBACK_MODELS[0]!);
   return out;

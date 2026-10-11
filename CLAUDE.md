@@ -79,7 +79,8 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
 - **Slash commands** come from `initializationResult().commands` of a warmed-up session (process started on
   input focus or on `/`). `/clear`, `/effort` and `/model` are handled by the view (`local-commands.ts`):
   their terminal versions are interactive pickers that only print "Usage" over the SDK, so the view opens
-  its own picker or applies the argument. Everything else passes through.
+  its own picker or applies the argument. Everything else passes through. Messages starting with `/` don't
+  expect hook context (local commands don't fire UserPromptSubmit).
 - **Slash command arguments**: after `/cmd `, the popup offers the first argument's values. Effort/model come
   from the view (picking applies at once); every other command's values come from the `a|b|c` alternatives in
   its documented `argumentHint` (`argChoices`). Never parse command *output* ("Usage: …") — not a stable format.
@@ -87,8 +88,11 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   Claude Code itself omits TUI-only commands (`/permissions`, `/resume`, `/login`…) from the SDK list.
 - **Effort** is a chat pref ("" = Claude Code's default): `effort` query option at start, then
   `applyFlagSettings({ effortLevel })` mid-session (verified by e2e via `CLAUDE_EFFORT` in Bash). The button
-  hides for models with `supportsEffort: false`.
-  Messages starting with `/` don't expect hook context (local commands don't fire UserPromptSubmit).
+  hides for models without effort levels.
+- **"Default" shows its value**: the model button names the model the default row resolves to (documented
+  `ModelInfo.resolvedModel`); the effort button shows the level Claude Code really applies, from the
+  **undocumented** `Query.getSettings().applied` (isolated in `applied-settings.ts`, degrades to "Default";
+  the e2e test asserts it still works).
 - **Icons**: only Lucide names that exist in Obsidian's bundled set (checked against app.js: names appear as
   `"name":[[` or `name:[[`). The preview marks unknown icons red.
 

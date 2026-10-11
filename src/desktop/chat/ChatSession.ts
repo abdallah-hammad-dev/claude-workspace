@@ -14,6 +14,7 @@ import {
   type SpawnOptions,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages";
+import { readAppliedSettings, type AppliedSettings } from "./applied-settings";
 
 export interface SessionInit {
   commands: SlashCommand[];
@@ -72,6 +73,11 @@ export class ChatSession {
       () => null,
     );
     return this.init;
+  }
+
+  /** The model and effort Claude Code really uses (null if unknown or not running). */
+  applied(): Promise<AppliedSettings | null> {
+    return this.q ? readAppliedSettings(this.q) : Promise.resolve(null);
   }
 
   send(content: string | ContentBlockParam[]): void {
