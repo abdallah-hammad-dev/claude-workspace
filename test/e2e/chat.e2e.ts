@@ -151,4 +151,29 @@ describe.skipIf(!claudePath)("chat e2e (real Claude Code)", () => {
     resumed.close();
     expect(ended.filter(Boolean)).toEqual([]);
   }, 240_000);
+
+  it("starts at the chosen effort and changes it mid-conversation", async () => {
+    const messages: SDKMessage[] = [];
+    const session = new ChatSession({
+      cwd: vault,
+      claudePath: claudePath!,
+      env: { ...process.env },
+      mcpServers: {},
+      // Haiku has no effort levels; Claude Code exposes the level to Bash as CLAUDE_EFFORT.
+      model: "sonnet",
+      effort: "low",
+      permissionMode: "default",
+      appendSystemPrompt: "Answer in as few words as possible.",
+      canUseTool: async (_name, input) => ({ behavior: "allow", updatedInput: input }),
+      onMessage: (m) => messages.push(m),
+      onEnd: () => undefined,
+    });
+    const ask = "Run `echo effort=$CLAUDE_EFFORT` with the Bash tool and reply with its output only.";
+    session.send(ask);
+    expect(finalText(await runTurn(session, messages))).toContain("effort=low");
+    await session.setEffort("high");
+    session.send(ask);
+    expect(finalText(await runTurn(session, messages))).toContain("effort=high");
+    session.close();
+  }, 240_000);
 });

@@ -276,8 +276,11 @@ export class Menu extends Component {
   }
   showAtPosition(pos: { x: number; y: number }): this {
     document.body.appendChild(this.dom);
+    // Like Obsidian: keep the menu inside the window.
+    this.dom.style.left = "0px";
+    const w = this.dom.offsetWidth;
     const h = this.dom.offsetHeight;
-    this.dom.style.left = `${pos.x}px`;
+    this.dom.style.left = `${Math.max(8, Math.min(pos.x, window.innerWidth - w - 8))}px`;
     this.dom.style.top = `${Math.max(8, pos.y - h - 4)}px`;
     return this;
   }

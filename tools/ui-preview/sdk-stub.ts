@@ -8,12 +8,13 @@ export const FAKE_COMMANDS = [
   { name: "obsidian-commands", description: "Run Obsidian commands (core features and any installed plugin)", argumentHint: "" },
   { name: "init", description: "Initialize a new CLAUDE.md file with codebase documentation", argumentHint: "", builtin: true },
   { name: "model", description: "Set the AI model for Claude Code", argumentHint: "<model>", builtin: true },
+  { name: "effort", description: "Set effort level for model usage", argumentHint: "<low|medium|high|xhigh|max|auto>", builtin: true },
 ];
 
 export const FAKE_MODELS = [
-  { value: "default", displayName: "Default (recommended)", description: "Opus 5.5 · Most capable for complex work" },
-  { value: "sonnet", displayName: "Sonnet", description: "Sonnet 5.5 · Best for everyday tasks" },
-  { value: "haiku", displayName: "Haiku", description: "Haiku 5.5 · Fastest for quick answers" },
+  { value: "default", displayName: "Default (recommended)", description: "Opus 5.5 · Most capable for complex work", supportsEffort: true, supportedEffortLevels: ["low", "medium", "high", "xhigh", "max"] },
+  { value: "sonnet", displayName: "Sonnet", description: "Sonnet 5.5 · Best for everyday tasks", supportsEffort: true, supportedEffortLevels: ["low", "medium", "high", "max"] },
+  { value: "haiku", displayName: "Haiku", description: "Haiku 5.5 · Fastest for quick answers", supportsEffort: false },
   { value: "claude-opus-4-8", displayName: "claude-opus-4-8", description: "" },
 ];
 
@@ -24,6 +25,7 @@ export function query(): unknown {
     interrupt: () => Promise.resolve(),
     setModel: () => Promise.resolve(),
     setPermissionMode: () => Promise.resolve(),
+    applyFlagSettings: () => Promise.resolve(),
     close: () => undefined,
   };
 }

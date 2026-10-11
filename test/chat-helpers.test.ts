@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { parseLocalCommand } from "../src/desktop/chat/local-commands";
 import { relativeTime } from "../src/desktop/chat/modals";
 import { filterCommands, filterFiles, mentionQuery, slashQuery } from "../src/desktop/chat/suggest";
 import { describeSuggestions, permissionAsk, relPath } from "../src/desktop/chat/tool-render";
@@ -18,6 +19,26 @@ describe("slash and mention detection", () => {
     expect(mentionQuery("@", 1)).toEqual({ query: "", start: 0 });
     expect(mentionQuery("mail me@example.com", 19)).toBeNull();
     expect(mentionQuery("@done and more", 14)).toBeNull();
+  });
+});
+
+describe("parseLocalCommand", () => {
+  it("handles /effort, /model and bare /clear locally", () => {
+    expect(parseLocalCommand("/effort")).toEqual({ kind: "effort", level: null, arg: "" });
+    expect(parseLocalCommand("/effort High")).toEqual({ kind: "effort", level: "high", arg: "High" });
+    expect(parseLocalCommand("/effort extra high")).toEqual({ kind: "effort", level: "xhigh", arg: "extra high" });
+    expect(parseLocalCommand("/effort auto")).toEqual({ kind: "effort", level: "", arg: "auto" });
+    expect(parseLocalCommand("/effort turbo")).toEqual({ kind: "effort", level: null, arg: "turbo" });
+    expect(parseLocalCommand("/model")).toEqual({ kind: "model", arg: "" });
+    expect(parseLocalCommand("/model sonnet ")).toEqual({ kind: "model", arg: "sonnet" });
+    expect(parseLocalCommand("/clear")).toEqual({ kind: "clear" });
+  });
+
+  it("passes everything else through to Claude Code", () => {
+    expect(parseLocalCommand("/clear my-name")).toBeNull();
+    expect(parseLocalCommand("/efforts")).toBeNull();
+    expect(parseLocalCommand("/compact")).toBeNull();
+    expect(parseLocalCommand("set /effort high")).toBeNull();
   });
 });
 

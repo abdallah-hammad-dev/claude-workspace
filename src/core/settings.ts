@@ -14,10 +14,14 @@ export interface ServerSettings {
   token: string;
 }
 
+export type EffortLevel = "low" | "medium" | "high" | "xhigh" | "max";
+
 export interface ChatPrefs {
   /** "" = Claude Code's default model. */
   model: string;
   permissionMode: "default" | "acceptEdits" | "plan" | "bypassPermissions" | "auto";
+  /** Reasoning effort; "" = Claude Code's default for the model. */
+  effort: EffortLevel | "";
 }
 
 /** Everything persisted in `.obsidian/plugins/claude-workspace/data.json`. */
@@ -37,7 +41,7 @@ export const DEFAULT_DATA: PluginData = {
   modules: {},
   server: { port: null, token: "" },
   claudePath: "",
-  chat: { model: "", permissionMode: "default" },
+  chat: { model: "", permissionMode: "default", effort: "" },
   chatShownOnce: false,
 };
 

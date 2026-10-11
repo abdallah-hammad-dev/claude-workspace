@@ -77,7 +77,12 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   it ("do this instead" → deny with message; plan → feedback; question → free-text answer). Plan approval
   sends `updatedPermissions: setMode` (acceptEdits/default) like Claude Code.
 - **Slash commands** come from `initializationResult().commands` of a warmed-up session (process started on
-  input focus or on `/`). `/clear` is handled by the view (= new conversation); everything else passes through.
+  input focus or on `/`). `/clear`, `/effort` and `/model` are handled by the view (`local-commands.ts`):
+  their terminal versions are interactive pickers that only print "Usage" over the SDK, so the view opens
+  its own picker or applies the argument. Everything else passes through.
+- **Effort** is a chat pref ("" = Claude Code's default): `effort` query option at start, then
+  `applyFlagSettings({ effortLevel })` mid-session (verified by e2e via `CLAUDE_EFFORT` in Bash). The button
+  hides for models with `supportsEffort: false`.
   Messages starting with `/` don't expect hook context (local commands don't fire UserPromptSubmit).
 - **Icons**: only Lucide names that exist in Obsidian's bundled set (checked against app.js: names appear as
   `"name":[[` or `name:[[`). The preview marks unknown icons red.

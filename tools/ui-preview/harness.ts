@@ -123,7 +123,7 @@ async function renderSettings(): Promise<void> {
 // ───────────────────────── chat ─────────────────────────
 
 async function renderChat(): Promise<void> {
-  const prefs = { model: "", permissionMode: (params.get("mode") ?? "default") as "default" };
+  const prefs = { model: "", permissionMode: (params.get("mode") ?? "default") as "default", effort: (params.get("effort") ?? "") as "" };
   const host: ChatHost = {
     app,
     plugin,
@@ -276,6 +276,12 @@ async function renderChat(): Promise<void> {
       await conversation();
       view.setBusy(false);
       view.modeBtn.click();
+      break;
+    case "chat-effort-menu":
+      view.warm();
+      await tick(50);
+      await view.changeEffort("high");
+      view.effortBtn.click();
       break;
     case "chat-context-preview":
       view.contextRowEl.querySelector("button")?.click();

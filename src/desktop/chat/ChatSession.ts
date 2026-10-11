@@ -2,6 +2,7 @@ import { spawn } from "node:child_process";
 import {
   query,
   type CanUseTool,
+  type EffortLevel,
   type ModelInfo,
   type SlashCommand,
   type McpServerConfig,
@@ -25,6 +26,8 @@ export interface ChatSessionOptions {
   env: Record<string, string | undefined>;
   mcpServers: Record<string, McpServerConfig>;
   model?: string;
+  /** Unset = Claude Code's default for the model. */
+  effort?: EffortLevel;
   permissionMode: PermissionMode;
   resume?: string;
   appendSystemPrompt: string;
@@ -86,6 +89,12 @@ export class ChatSession {
     await this.q?.setModel(model);
   }
 
+  /** Undefined goes back to the model's default level. */
+  async setEffort(effort: EffortLevel | undefined): Promise<void> {
+    this.opts = { ...this.opts, effort };
+    await this.q?.applyFlagSettings({ effortLevel: effort ?? null });
+  }
+
   async setPermissionMode(mode: PermissionMode): Promise<void> {
     this.opts = { ...this.opts, permissionMode: mode };
     await this.q?.setPermissionMode(mode);
@@ -118,6 +127,7 @@ export class ChatSession {
         includePartialMessages: true,
         permissionMode: o.permissionMode,
         model: o.model,
+        effort: o.effort,
         resume: this.sessionId ?? undefined,
         canUseTool: o.canUseTool,
         abortController: this.abort,

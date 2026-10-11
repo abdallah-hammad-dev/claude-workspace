@@ -14,9 +14,10 @@ import { ItemView, Menu, Notice, setIcon, setTooltip, type App, type Plugin, typ
 import type { ContextEngine } from "../../core/context/ContextEngine";
 import type { ActiveContext, Disposer, Logger } from "../../core/module-api";
 import type { ModuleRegistry } from "../../core/ModuleRegistry";
-import type { ChatPrefs } from "../../core/settings";
+import type { ChatPrefs, EffortLevel } from "../../core/settings";
 import type { HostState, ServedContext } from "../McpHost";
 import { ChatSession } from "./ChatSession";
+import { EFFORTS, parseLocalCommand } from "./local-commands";
 import { SessionPickerModal, sessionTitle } from "./modals";
 import { PromptDock } from "./PromptDock";
 import { filterCommands, filterFiles, InlineSuggest, mentionQuery, slashQuery } from "./suggest";
@@ -45,6 +46,8 @@ interface ModelChoice {
   value: string;
   label: string;
   desc: string;
+  /** Effort levels the model accepts; [] = no effort control, undefined = unknown. */
+  efforts?: EffortLevel[];
 }
 
 const FALLBACK_MODELS: ModelChoice[] = [
@@ -97,6 +100,7 @@ export class ChatView extends ItemView {
   private sendBtn!: HTMLButtonElement;
   private modeBtn!: HTMLButtonElement;
   private modelBtn!: HTMLButtonElement;
+  private effortBtn!: HTMLButtonElement;
   private usageEl!: HTMLElement;
   private attachments: Attachment[] = [];
   private busy = false;
@@ -199,12 +203,14 @@ export class ChatView extends ItemView {
     const footer = box.createDiv({ cls: "cw-input-footer" });
     this.modeBtn = footer.createEl("button", { cls: "cw-footer-btn" });
     this.modelBtn = footer.createEl("button", { cls: "cw-footer-btn" });
+    this.effortBtn = footer.createEl("button", { cls: "cw-footer-btn" });
     footer.createDiv({ cls: "cw-spacer" });
     this.usageEl = footer.createDiv({ cls: "cw-usage" });
     this.sendBtn = footer.createEl("button", { cls: "cw-send" });
 
-    this.modeBtn.onclick = (e) => this.openModeMenu(e);
-    this.modelBtn.onclick = (e) => this.openModelMenu(e);
+    this.modeBtn.onclick = () => this.openModeMenu();
+    this.modelBtn.onclick = () => this.openModelMenu();
+    this.effortBtn.onclick = () => this.openEffortMenu();
     this.sendBtn.onclick = () => (this.isStopMode() ? void this.stop() : this.submit());
     this.input.addEventListener("keydown", (e) => this.onKeyDown(e));
     this.input.addEventListener("input", () => this.onInput());
@@ -222,6 +228,7 @@ export class ChatView extends ItemView {
     this.updatePlaceholder();
     this.updateModeButton();
     this.updateModelButton();
+    this.updateEffortButton();
     this.updateSendButton();
     this.updateUsage();
     this.renderEmpty();
@@ -252,9 +259,8 @@ export class ChatView extends ItemView {
       return;
     }
     if (!text && !this.attachments.length) return;
-    if (text === "/clear") {
+    if (!this.attachments.length && this.runLocalCommand(text)) {
       this.clearInput();
-      this.newConversation();
       return;
     }
 
@@ -298,6 +304,7 @@ export class ChatView extends ItemView {
       env: this.host.spawnEnv(claudePath),
       mcpServers: this.host.mcpServers(),
       model: prefs.model || undefined,
+      effort: prefs.effort || undefined,
       permissionMode: prefs.permissionMode,
       resume: this.resumeId ?? undefined,
       appendSystemPrompt: SYSTEM_PROMPT_APPEND,
@@ -321,8 +328,38 @@ export class ChatView extends ItemView {
       this.commands = init.commands;
       this.models = toModelChoices(init.models);
       this.updateModelButton();
+      this.updateEffortButton();
       if (this.suggest.isOpen) this.onInput();
     });
+  }
+
+  /** `/clear`, `/effort` and `/model` are handled here; returns false to send the text to Claude Code. */
+  private runLocalCommand(text: string): boolean {
+    const cmd = parseLocalCommand(text);
+    if (!cmd) return false;
+    switch (cmd.kind) {
+      case "clear":
+        this.newConversation();
+        break;
+      case "effort":
+        if (cmd.level !== null) void this.changeEffort(cmd.level);
+        else {
+          if (cmd.arg) new Notice(`Unknown effort level "${cmd.arg}". Use low, medium, high, xhigh, max or auto.`);
+          this.openEffortMenu();
+        }
+        break;
+      case "model": {
+        if (!cmd.arg) {
+          this.openModelMenu();
+          break;
+        }
+        const a = cmd.arg.toLowerCase();
+        const match = this.models.find((m) => m.value.toLowerCase() === a || m.label.toLowerCase() === a);
+        void this.changeModel(a === "default" ? "" : (match?.value ?? cmd.arg));
+        break;
+      }
+    }
+    return true;
   }
 
   private async stop(): Promise<void> {
@@ -518,7 +555,7 @@ export class ChatView extends ItemView {
 
   // ───────────────────────── mode & model ─────────────────────────
 
-  private openModeMenu(e: MouseEvent): void {
+  private openModeMenu(): void {
     const current = this.host.prefs().permissionMode;
     const menu = new Menu();
     for (const m of MODES) {
@@ -531,7 +568,7 @@ export class ChatView extends ItemView {
           .onClick(() => void this.applyMode(m.value, true)),
       );
     }
-    showMenuAbove(menu, e);
+    showMenuAbove(menu, this.modeBtn);
   }
 
   private async applyMode(mode: Mode, tellSession: boolean): Promise<void> {
@@ -549,7 +586,7 @@ export class ChatView extends ItemView {
     setTooltip(this.modeBtn, `Permission mode: ${mode.desc}`, { placement: "top" });
   }
 
-  private openModelMenu(e: MouseEvent): void {
+  private openModelMenu(): void {
     this.warm();
     const current = this.host.prefs().model;
     const menu = new Menu();
@@ -574,12 +611,13 @@ export class ChatView extends ItemView {
         );
       }
     }
-    showMenuAbove(menu, e);
+    showMenuAbove(menu, this.modelBtn);
   }
 
   private async changeModel(model: string): Promise<void> {
     await this.host.savePrefs({ model });
     this.updateModelButton();
+    this.updateEffortButton();
     await this.session?.setModel(model || undefined);
   }
 
@@ -587,9 +625,63 @@ export class ChatView extends ItemView {
     const value = this.host.prefs().model;
     const m = this.models.find((x) => x.value === value);
     this.modelBtn.empty();
-    this.modelBtn.createSpan({ cls: "cw-footer-label", text: m?.label ?? (value || "Default") });
+    // "Default (recommended)" is too long for a narrow panel; the menu keeps the full name.
+    const label = (m?.label ?? (value || "Default")).replace(/\s*\(recommended\)$/i, "");
+    this.modelBtn.createSpan({ cls: "cw-footer-label", text: label });
     setIcon(this.modelBtn.createSpan({ cls: "cw-footer-chevron" }), "chevron-down");
     setTooltip(this.modelBtn, "Model", { placement: "top" });
+  }
+
+  /** Levels the selected model accepts (all of them while Claude Code hasn't said). */
+  private effortLevels(): typeof EFFORTS {
+    const levels = this.models.find((m) => m.value === this.host.prefs().model)?.efforts;
+    return levels ? EFFORTS.filter((e) => levels.includes(e.value)) : EFFORTS;
+  }
+
+  private openEffortMenu(): void {
+    this.warm();
+    const current = this.host.prefs().effort;
+    const menu = new Menu();
+    menu.addItem((item) =>
+      item
+        .setTitle(menuLabel("Default", "The model's usual level"))
+        .setChecked(current === "")
+        .onClick(() => void this.changeEffort("")),
+    );
+    menu.addSeparator();
+    for (const e of this.effortLevels()) {
+      menu.addItem((item) =>
+        item
+          .setTitle(menuLabel(e.label, e.desc))
+          .setChecked(e.value === current)
+          .onClick(() => void this.changeEffort(e.value)),
+      );
+    }
+    showMenuAbove(menu, this.effortBtn.isShown() ? this.effortBtn : this.modelBtn);
+  }
+
+  private async changeEffort(effort: EffortLevel | ""): Promise<void> {
+    await this.host.savePrefs({ effort });
+    this.updateEffortButton();
+    await this.session?.setEffort(effort || undefined);
+  }
+
+  private updateEffortButton(): void {
+    const btn = this.effortBtn;
+    const supported = this.models.find((m) => m.value === this.host.prefs().model)?.efforts;
+    btn.toggle(!supported || supported.length > 0);
+    const current = EFFORTS.find((e) => e.value === this.host.prefs().effort);
+    btn.empty();
+    setIcon(btn.createSpan({ cls: "cw-footer-icon" }), "brain");
+    if (current) btn.createSpan({ cls: "cw-footer-label", text: current.label });
+    const capped = current && supported && !supported.includes(current.value);
+    setTooltip(
+      btn,
+      current
+        ? `Effort: ${current.label}${capped ? " (not supported by this model; Claude Code lowers it)" : ""}`
+        : "Effort: default for this model. Click to think harder or answer faster.",
+      { placement: "top" },
+    );
   }
 
   // ───────────────────────── composer ─────────────────────────
@@ -871,7 +963,8 @@ function toModelChoices(models: ModelInfo[]): ModelChoice[] {
   for (const m of models) {
     const value = m.value === "default" ? "" : m.value;
     if (out.some((x) => x.value === value)) continue;
-    out.push({ value, label: m.displayName || m.value, desc: m.description ?? "" });
+    const efforts = m.supportsEffort === false ? [] : m.supportedEffortLevels;
+    out.push({ value, label: m.displayName || m.value, desc: m.description ?? "", efforts });
   }
   if (!out.some((x) => x.value === "")) out.unshift(FALLBACK_MODELS[0]!);
   return out;
@@ -885,8 +978,8 @@ function menuLabel(title: string, desc: string): DocumentFragment {
 }
 
 /** Composer menus open upwards from their button. */
-function showMenuAbove(menu: Menu, e: MouseEvent): void {
-  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+function showMenuAbove(menu: Menu, anchor: HTMLElement): void {
+  const rect = anchor.getBoundingClientRect();
   menu.showAtPosition({ x: rect.left, y: rect.top, overlap: true });
 }
 
