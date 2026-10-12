@@ -1,11 +1,85 @@
 # Claude Workspace for Obsidian
 
-Turns Obsidian into a workspace for [Claude Code](https://code.claude.com): Claude sees what you're looking at
-(active note, cursor, selection, open drawing) and acts on it through a local MCP server. The same setup works in
-the plugin's chat view and in a `claude` terminal opened in the vault.
+Claude Code inside Obsidian: a chat panel that knows which note or drawing you're looking at, plus a local MCP
+server that lets Claude act on Obsidian itself. The same setup also works when you run `claude` in a terminal
+inside your vault.
 
-> Status: **early but usable** — live context, local MCP server, chat view, Excalidraw module.
-> Plan and roadmap: `docs/BRIEF.md`. Manual test checklists: `docs/testing.md`.
+> [!WARNING]
+> **Vibe-coded. Use at your own risk.**
+> I built this plugin by describing what I wanted to Claude Code and testing the result, not by writing the
+> code myself. It's a personal tool that I use on my own vault and share as is. Don't expect a deep, low-level
+> understanding of the code from me, quick fixes, or support. It lets Claude read and edit files in your
+> vault, so try it on a test vault or a backed-up vault first.
+
+## What it does
+
+- **Chat panel.** Claude Code runs in a side panel, with streaming replies, tool calls (including diffs), and
+  inline permission prompts. Modes: *Ask before edits*, *Accept edits*, *Plan*, *Auto*, *Bypass*. You can
+  also pick the model and the reasoning effort.
+- **Live context.** Before each message, Claude gets a short description of what you're doing. That covers
+  the open note or drawing, cursor, section, selection, selected Excalidraw elements and other open tabs, but
+  not file contents (Claude reads files itself). Each of your messages shows exactly what was sent.
+- **Claude Code features.** `/` commands are autocompleted, including their argument values, and `@` mentions
+  vault files. You can resume earlier conversations, including ones started in a terminal. Your CLAUDE.md,
+  skills, hooks and permissions all apply.
+- **Attachments.**
+  - Paste or drop images and PDFs (up to 10 MB).
+  - Other files and bigger PDFs are referenced by path.
+  - Drag notes from Obsidian's file list to mention them.
+  - Long pastes collapse to `[Pasted text #1 +40 lines]`, like in Claude Code.
+- **Works from a terminal too.** `claude` started in the vault gets the same context and the same Obsidian
+  tools.
+- **Modules.** Features come as modules that you turn on or off in settings:
+  - **Obsidian** (always on): open files and report the active context.
+  - **Markdown:** cursor, section and selection in notes.
+  - **Commands:** search and run command-palette commands from Obsidian and other plugins (with a blocklist).
+  - **Excalidraw:** read, edit, screenshot and zoom the open drawing live (needs the Excalidraw plugin).
+
+## Requirements
+
+- Obsidian **1.7.2+** on desktop.
+  - Tested on Windows and on Linux (1.14.4, tarball build).
+  - macOS should work but is untested.
+  - Flatpak and Snap builds of Obsidian are sandboxed and may not find `claude`.
+  - On mobile the plugin loads but does nothing yet, since the chat needs a desktop.
+- [Claude Code](https://code.claude.com) installed **natively** and logged in once (run `claude` in a terminal).
+  On Windows, use the native installer. A `claude` that only exists inside WSL can't reach Obsidian.
+
+## Install
+
+There's no release yet, so build it from source (needs Node.js 20+):
+
+```sh
+git clone git@github.com:abdallah-hammad-dev/claude-workspace.git
+cd claude-workspace
+npm install
+npm run build
+mkdir -p "<your vault>/.obsidian/plugins/claude-workspace"
+cp main.js manifest.json styles.css "<your vault>/.obsidian/plugins/claude-workspace/"
+```
+
+Then in Obsidian:
+1. Go to **Settings → Community plugins** and turn off Restricted mode.
+2. Enable **Claude Workspace**.
+3. The chat panel opens. Click **Install** in the "Connect this vault" banner.
+
+## What it changes in your vault
+
+- **Install** writes these files and merges with what's already there:
+  - `.mcp.json`
+  - `.claude/settings.json` (the context hook)
+  - `.claude/skills/<name>/SKILL.md`
+- `.obsidian/plugins/claude-workspace/data.json` holds the settings and the local server token.
+  `debug.log` sits next to it, and never contains tokens or note contents.
+- `.mcp.json` and `.claude/settings.json` contain the token. **Keep them out of git and out of any public sync.**
+
+## Safety and privacy
+
+- The plugin's server listens on `127.0.0.1` only. It requires a token and rejects browser requests.
+- Claude Code can read and edit files and run commands in your vault folder, depending on the permission mode.
+  Start with *Ask before edits*. Don't use *Bypass permissions* on a vault you care about.
+- Your messages, the context block and anything Claude reads go to Anthropic through Claude Code, under your own
+  account. That's the same as using Claude Code in a terminal.
 
 ## How it works
 
@@ -13,50 +87,21 @@ the plugin's chat view and in a `claude` terminal opened in the vault.
 Obsidian ── plugin ── 127.0.0.1:<port>/mcp      MCP server (tools from modules)
                   └── 127.0.0.1:<port>/context  Claude Code HTTP hook (UserPromptSubmit)
                            ▲
-         Claude Code: chat view (Agent SDK)  or  `claude` in a terminal in the vault
+         Claude Code: chat panel (Agent SDK)  or  `claude` in a terminal in the vault
 ```
 
-- **Context follows you.** Before every prompt Claude Code calls the plugin's `/context` hook and gets an
-  `<obsidian_context>` block: the note or drawing you're looking at, cursor, section, selection, selected
-  Excalidraw elements, other open tabs. Never file contents (Claude reads files itself). The chat view shows the
-  exact block it sent under each of your messages.
-- **Same setup everywhere.** `Install Claude Code config in this vault` writes `.mcp.json`, the hook in
-  `.claude/settings.json` and module skills. The chat view loads the same settings (`settingSources`), so a
-  terminal `claude` session in the vault behaves the same, and sessions can be resumed from either side.
-- **No hidden prompting.** What you type is sent as is. The system prompt is Claude Code's own plus one short
-  paragraph (`SYSTEM_PROMPT_APPEND` in `src/desktop/chat/ChatView.ts`) saying it runs inside Obsidian.
-- **Security.** The server listens on 127.0.0.1 only, requires a bearer token, and rejects browser requests
-  (any `Origin` header) and unexpected `Host` headers. `.mcp.json` and `.claude/settings.json` contain the token:
-  keep them out of git and sync.
+- **The plugin is a thin host.** The agent itself is Claude Code, and the plugin only serves context and tools.
+- **Context comes from a hook.** Claude Code calls `/context` before every prompt, and the reply is added to the
+  prompt as context.
+- **No hidden prompting.** The system prompt is Claude Code's own, plus one short paragraph saying it runs inside
+  Obsidian (`SYSTEM_PROMPT_APPEND` in `src/desktop/chat/ChatView.ts`).
 
-## Use it
-
-1. Install [Claude Code](https://code.claude.com) natively (Windows: the native installer, not only in WSL — a
-   WSL `claude` can't reach Obsidian's localhost unless WSL uses mirrored networking).
-2. Enable the plugin, open **Settings → Claude Workspace**, click **Install**.
-3. Click the bot icon in the ribbon to chat, or run `claude` in a terminal inside the vault.
-
-| Tool | What it does |
-|---|---|
-| `obsidian_get_active_context` | Structured version of the context block |
-| `obsidian_open_file` | Open a vault file (optionally at a line) |
-| `commands_list` / `commands_run` | Search and run any command-palette command (core + plugins), with a blocklist |
-| `excalidraw_get_scene` | Live elements of the open drawing (labels merged, bindings, selection) |
-| `excalidraw_apply` | Batch of add_shape / add_text / connect / update / delete, validated before applying |
-| `excalidraw_screenshot` | PNG of the live drawing |
-| `excalidraw_focus` | Select + zoom to elements |
-
-## Compared to Claudian
-
-[Claudian](https://github.com/YishenTu/claudian) (MIT) inspired this plugin; a few patterns (Windows CLI detection,
-spawning the SDK in Electron) follow it. Differences: context is re-read on every message (not frozen at the
-first one) and injected by a Claude Code hook rather than by the UI; Obsidian tools are served over a local MCP
-server so the terminal CLI gets them too; sessions are Claude Code's own; features are modules.
+More detail: `CLAUDE.md` (architecture and decisions), `docs/module-api.md`, `docs/testing.md`. The original plan
+is in `docs/BRIEF.md`.
 
 ## Develop
 
 ```sh
-npm install
 npm test            # unit tests (Vitest, with an obsidian stub)
 npm run lint
 npm run build       # → main.js
@@ -64,28 +109,30 @@ npm run test:e2e    # real Claude Code CLI against the real MCP server (uses you
 npm run ui:preview  # screenshots of the chat view and settings with Obsidian's real stylesheet
 ```
 
-### Try it in a test vault
+Try it in a test vault:
 
 ```sh
-# Linux/macOS: deploys into ./test-vault
-npm run deploy
-# Windows Obsidian, building from WSL: deploy to a vault on the Windows side
-TEST_VAULT=/mnt/c/Users/<you>/Documents/cw-test-vault npm run deploy
+npm run deploy                                                # Linux/macOS: into ./test-vault
+TEST_VAULT=/mnt/c/Users/<you>/Documents/cw-test-vault npm run deploy   # Windows Obsidian, building from WSL
 ```
 
-Open that folder as a vault in Obsidian, trust it, and enable **Claude Workspace** under Community plugins.
-The deploy script refuses to write into any non-empty folder that isn't marked as a test vault.
+The deploy script refuses to write into a non-empty folder that isn't marked as a test vault.
 
-## Modules
-
-Features live in modules (`src/modules/<id>`) that register tools, context providers, views, commands, settings
-and Claude Code skills through one API (`src/core/module-api.ts`). Other plugins can add modules:
+### Modules from other plugins
 
 ```ts
 const cw = app.plugins.plugins["claude-workspace"]?.api;
 const dispose = cw?.registerModule({ id: "mymod", name: "My module", onload(ctx) { /* ctx.registerTool(…) */ } });
 ```
 
+## Credits
+
+[Claudian](https://github.com/YishenTu/claudian) (MIT) inspired this plugin. A few patterns follow it and were
+reimplemented here: Windows CLI detection, and spawning the SDK inside Electron. The differences:
+- Context is re-read on every message and injected by a Claude Code hook.
+- Obsidian tools go through a local MCP server, so terminal `claude` gets them too.
+- Features are modules.
+
 ## License
 
-MIT
+[MIT](LICENSE). The software is provided "as is", without warranty of any kind.
