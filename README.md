@@ -47,21 +47,51 @@ inside your vault.
 
 ## Install
 
-There's no release yet, so build it from source (needs Node.js 20+):
+First install [Claude Code](https://code.claude.com) and log in once by running `claude` in a terminal.
+Then pick one of the methods below.
+
+### With BRAT (recommended: one paste, automatic updates)
+
+[BRAT](https://github.com/TfTHacker/obsidian42-brat) installs plugins straight from a GitHub repository and
+keeps them up to date.
+
+1. In Obsidian, open **Settings → Community plugins**, turn off Restricted mode, then **Browse**. Search for
+   **BRAT**, then **Install** and **Enable** it.
+2. Open the command palette (`Ctrl/Cmd + P`) and run **BRAT: Plugins: Add a beta plugin for testing (with or without version)**.
+3. In **Repository**, paste:
+   ```
+   https://github.com/abdallah-hammad-dev/claude-workspace
+   ```
+4. Keep **Latest version** and **Enable after installing the plugin**, then click **Add plugin**.
+5. The Claude panel opens on the right. Click **Install** in the "Connect this vault" banner.
+
+**Updates:** BRAT checks for new versions every time Obsidian starts (on by default). To update right away, run
+**BRAT: Plugins: Check for updates to all beta plugins and UPDATE**.
+
+No GitHub token is needed: the repository is public.
+
+### Manually, from a release
+
+1. Download `main.js`, `manifest.json` and `styles.css` from the
+   [latest release](https://github.com/abdallah-hammad-dev/claude-workspace/releases/latest).
+2. Put them in `<your vault>/.obsidian/plugins/claude-workspace/`.
+3. In **Settings → Community plugins**, turn off Restricted mode and enable **Claude Workspace**.
+4. Click **Install** in the "Connect this vault" banner.
+
+Updates are manual: download the three files again.
+
+### From source
+
+Needs Node.js 20+:
 
 ```sh
-git clone git@github.com:abdallah-hammad-dev/claude-workspace.git
+git clone https://github.com/abdallah-hammad-dev/claude-workspace.git
 cd claude-workspace
 npm install
 npm run build
 mkdir -p "<your vault>/.obsidian/plugins/claude-workspace"
 cp main.js manifest.json styles.css "<your vault>/.obsidian/plugins/claude-workspace/"
 ```
-
-Then in Obsidian:
-1. Go to **Settings → Community plugins** and turn off Restricted mode.
-2. Enable **Claude Workspace**.
-3. The chat panel opens. Click **Install** in the "Connect this vault" banner.
 
 ## What it changes in your vault
 
@@ -96,8 +126,8 @@ Obsidian ── plugin ── 127.0.0.1:<port>/mcp      MCP server (tools from m
 - **No hidden prompting.** The system prompt is Claude Code's own, plus one short paragraph saying it runs inside
   Obsidian (`SYSTEM_PROMPT_APPEND` in `src/desktop/chat/ChatView.ts`).
 
-More detail: `CLAUDE.md` (architecture and decisions), `docs/module-api.md`, `docs/testing.md`. The original plan
-is in `docs/BRIEF.md`.
+More detail: `CLAUDE.md` (architecture and decisions), `docs/module-api.md`, `docs/testing.md` and
+`docs/releasing.md`. The original plan is in `docs/BRIEF.md`.
 
 ## Develop
 
@@ -117,6 +147,9 @@ TEST_VAULT=/mnt/c/Users/<you>/Documents/cw-test-vault npm run deploy   # Windows
 ```
 
 The deploy script refuses to write into a non-empty folder that isn't marked as a test vault.
+
+Releasing a new version (also what BRAT users receive): see [`docs/releasing.md`](docs/releasing.md). In short,
+`npm version patch` then `git push --follow-tags`.
 
 ### Modules from other plugins
 

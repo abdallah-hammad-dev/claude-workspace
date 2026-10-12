@@ -12,6 +12,9 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   **Look at the screenshots after any UI change.** Scenarios live in `tools/ui-preview/harness.ts`.
 - `TEST_VAULT=/mnt/c/Users/abdal/Documents/cw-test-vault npm run deploy` — build + copy into a test vault.
   The script refuses non-empty folders without the `.claude-workspace-test-vault` marker.
+- Release: `npm version patch|minor|major` then `git push --follow-tags` → the Release workflow checks
+  tag = manifest = package version, runs lint/tests/build, publishes `main.js`/`manifest.json`/`styles.css`.
+  Details and rules in `docs/releasing.md`. Never hand-edit the manifest version or hand-create tags.
 
 ## Hard rules
 - Never write to the user's real vault (`C:\Users\abdal\Documents\aaa`). Only `test-vault/` or a marked test vault.
@@ -103,6 +106,10 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   `webUtils.getPathForFile` (`File.path` is gone since Electron 32). Notes/files dragged out of Obsidian carry
   documented `obsidian://open?vault=…&file=…` URIs in `text/uri-list` (no `.md`); folders only their path in
   `text/plain`. Local commands (`/model`…) run even with attachments, which wait for the next message.
+- **Distribution = GitHub releases** (public repo `abdallah-hammad-dev/claude-workspace`), installed with BRAT
+  (verified: BRAT 2.2.0 installs 0.1.0 from the repo URL, no token) or manually. Tags have no `v` (`.npmrc`).
+  CI (`.github/workflows/ci.yml`) runs lint/tests/build/mobile check on every push; e2e and UI screenshots stay
+  local (need a Claude login / Obsidian install).
 - **Icons**: only Lucide names that exist in Obsidian's bundled set (checked against app.js: names appear as
   `"name":[[` or `name:[[`). The preview marks unknown icons red.
 
