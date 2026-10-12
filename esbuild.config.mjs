@@ -8,7 +8,7 @@ const prod = process.argv[2] === "production";
 //    Shadow the timer globals in our module scope with Node-like handles.
 // 2. The SDK is ESM and uses import.meta.url; in a CJS bundle we point it at Obsidian's page.
 //    Both are guarded so the bundle still loads on mobile (no require/__filename there).
-const banner = `/* claude-workspace — bundled by esbuild. Sources: https://github.com/ (see README). */
+const banner = `/* claude-workspace — bundled by esbuild. Sources: https://github.com/abdallah-hammad-dev/claude-workspace */
 var __cwImportMetaUrl = (() => { try { return require("url").pathToFileURL(__filename).href; } catch { return "file:///"; } })();
 var { setTimeout, clearTimeout, setInterval, clearInterval } = (() => {
   const g = globalThis;

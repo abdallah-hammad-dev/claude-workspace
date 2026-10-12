@@ -1,0 +1,23 @@
+# Lint, unit tests and a production build on every push and pull request.
+# (The real-CLI e2e test and UI screenshots need a Claude Code login / an Obsidian install: run them locally.)
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+      - run: npm run check:mobile
