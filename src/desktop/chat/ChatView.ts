@@ -10,14 +10,16 @@ import {
   type SlashCommand,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { ContentBlockParam } from "@anthropic-ai/sdk/resources/messages";
-import { ItemView, Menu, Notice, setIcon, setTooltip, type App, type Plugin, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
+import { ItemView, Menu, Notice, setIcon, setTooltip, TFolder, type App, type Plugin, type ViewStateResult, type WorkspaceLeaf } from "obsidian";
 import type { ContextEngine } from "../../core/context/ContextEngine";
 import type { ActiveContext, Disposer, Logger } from "../../core/module-api";
 import type { ModuleRegistry } from "../../core/ModuleRegistry";
+import { toVaultPath } from "../../core/paths";
 import type { ChatPrefs, EffortLevel } from "../../core/settings";
 import type { HostState, ServedContext } from "../McpHost";
 import type { AppliedSettings } from "./applied-settings";
 import { ChatSession } from "./ChatSession";
+import { mentionFor, obsidianUriPaths, osPathOf } from "./drop";
 import { EFFORTS, parseLocalCommand } from "./local-commands";
 import { expandPastes, pastePlaceholder, shouldCollapse } from "./paste";
 import { SessionPickerModal, sessionTitle } from "./modals";
@@ -61,11 +63,13 @@ const FALLBACK_MODELS: ModelChoice[] = [
   { value: "haiku", label: "Haiku", desc: "Fastest" },
 ];
 
-interface Attachment {
-  mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp";
-  data: string;
-  name: string;
-}
+const IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"] as const;
+/** Bigger PDFs are referenced by path instead (Claude Code reads them page by page). */
+const MAX_PDF_BYTES = 10 * 1024 * 1024;
+
+type Attachment =
+  | { kind: "image"; mediaType: (typeof IMAGE_TYPES)[number]; data: string; name: string }
+  | { kind: "pdf"; data: string; name: string; size: number };
 
 export interface ChatHost {
   app: App;
@@ -229,8 +233,17 @@ export class ChatView extends ItemView {
     box.addEventListener("click", (e) => {
       if (e.target === box) this.input.focus();
     });
-    composer.addEventListener("dragover", (e) => e.preventDefault());
-    composer.addEventListener("drop", (e) => this.onDrop(e));
+    composer.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      box.addClass("is-drop-target");
+    });
+    composer.addEventListener("dragleave", (e) => {
+      if (!composer.contains(e.relatedTarget as Node | null)) box.removeClass("is-drop-target");
+    });
+    composer.addEventListener("drop", (e) => {
+      box.removeClass("is-drop-target");
+      this.onDrop(e);
+    });
 
     this.disposers.push(this.host.engine.onChange(() => void this.refreshContext()));
     this.disposers.push(this.host.onContextServed((s) => this.onServed(s)));
@@ -270,8 +283,11 @@ export class ChatView extends ItemView {
       return;
     }
     if (!text && !this.attachments.length) return;
-    if (!this.attachments.length && this.runLocalCommand(text)) {
-      this.clearInput();
+    // /model, /effort and /clear act at once; attached files wait for the next message.
+    if (this.runLocalCommand(text)) {
+      this.input.value = "";
+      this.pastes.clear();
+      this.onInput();
       return;
     }
 
@@ -282,16 +298,18 @@ export class ChatView extends ItemView {
       return;
     }
     const session = this.ensureSession(claudePath);
-    const content: ContentBlockParam[] = this.attachments.map((a) => ({
-      type: "image",
-      source: { type: "base64", media_type: a.mediaType, data: a.data },
-    }));
+    const content: ContentBlockParam[] = this.attachments.map((a) =>
+      a.kind === "image"
+        ? { type: "image", source: { type: "base64", media_type: a.mediaType, data: a.data } }
+        : { type: "document", source: { type: "base64", media_type: "application/pdf", data: a.data }, title: a.name },
+    );
     if (text) content.push({ type: "text", text });
 
     this.showTranscript();
     const isCommand = text.startsWith("/");
-    const images = this.attachments.map((a) => ({ mediaType: a.mediaType, data: a.data }));
-    const bubble = this.transcript.addUser(raw, { images, pastes, expectContext: !isCommand });
+    const images = this.attachments.flatMap((a) => (a.kind === "image" ? [{ mediaType: a.mediaType, data: a.data }] : []));
+    const documents = this.attachments.flatMap((a) => (a.kind === "pdf" ? [a.name] : []));
+    const bubble = this.transcript.addUser(raw, { images, documents, pastes, expectContext: !isCommand });
     if (!isCommand) this.pendingBubbles.push(bubble);
     if (this.headerTitleEl.getText() === "New conversation" && text && !isCommand) {
       const title = text.replace(/\s+/g, " ").trim();
@@ -800,7 +818,7 @@ export class ChatView extends ItemView {
         recent,
       );
       const items = paths.map((p) => ({
-        insert: /\s/.test(p) ? `@"${p}" ` : `@${p} `,
+        insert: `${mentionFor(p)} `,
         title: p.split("/").pop() ?? p,
         description: p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : undefined,
         icon: p.endsWith(".excalidraw.md") ? "shapes" : p.endsWith(".md") ? "file-text" : "file",
@@ -862,10 +880,10 @@ export class ChatView extends ItemView {
   }
 
   private onPaste(e: ClipboardEvent): void {
-    const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
+    const files = [...(e.clipboardData?.files ?? [])];
     if (files.length) {
       e.preventDefault();
-      void this.addImages(files);
+      void this.addFiles(files);
       return;
     }
     const text = e.clipboardData?.getData("text/plain") ?? "";
@@ -877,36 +895,73 @@ export class ChatView extends ItemView {
     this.onInput();
   }
 
+  /** Files from the OS are attached or referenced; notes and folders dragged out of Obsidian become @mentions. */
   private onDrop(e: DragEvent): void {
-    const files = [...(e.dataTransfer?.files ?? [])].filter((f) => f.type.startsWith("image/"));
-    if (!files.length) return;
+    const dt = e.dataTransfer;
+    if (!dt) return;
+    const files = [...dt.files];
+    if (files.length) {
+      e.preventDefault();
+      void this.addFiles(files);
+      return;
+    }
+    const paths = obsidianUriPaths(dt.getData("text/uri-list"), this.app.vault.getName())
+      .map((p) => this.app.vault.getAbstractFileByPath(p) ?? this.app.vault.getAbstractFileByPath(`${p}.md`))
+      .filter((f) => !!f)
+      .map((f) => f.path);
+    // Folders carry only their path as plain text.
+    const plain = dt.getData("text/plain").trim();
+    if (!paths.length && plain && this.app.vault.getAbstractFileByPath(plain) instanceof TFolder) paths.push(plain);
+    if (!paths.length) return;
     e.preventDefault();
-    void this.addImages(files);
+    this.insertMentions(paths);
   }
 
-  private async addImages(files: File[]): Promise<void> {
-    const skipped: string[] = [];
+  /**
+   * Images (and PDFs up to 10 MB) are sent with the message, as in the Claude apps. Anything else is
+   * referenced by path, like dropping a file into Claude Code in a terminal: an @mention inside the
+   * vault, the absolute path outside it.
+   */
+  private async addFiles(files: File[]): Promise<void> {
+    const byPath: string[] = [];
+    const failed: string[] = [];
     for (const f of files) {
-      const mediaType = f.type as Attachment["mediaType"];
-      if (!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mediaType)) {
-        skipped.push(f.name || f.type);
-        continue;
+      const name = f.name || "file";
+      if ((IMAGE_TYPES as readonly string[]).includes(f.type)) {
+        this.attachments.push({ kind: "image", mediaType: f.type as (typeof IMAGE_TYPES)[number], data: await toBase64(f), name });
+      } else if (f.type === "application/pdf" && f.size <= MAX_PDF_BYTES) {
+        this.attachments.push({ kind: "pdf", data: await toBase64(f), name, size: f.size });
+      } else {
+        const abs = osPathOf(f);
+        if (abs) byPath.push(toVaultPath(abs, this.host.vaultPath) ?? abs);
+        else failed.push(name);
       }
-      const buf = new Uint8Array(await f.arrayBuffer());
-      let bin = "";
-      for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
-      this.attachments.push({ mediaType, data: btoa(bin), name: f.name || "image" });
     }
-    if (skipped.length) new Notice(`Claude reads PNG, JPEG, GIF and WebP images. Not added: ${skipped.join(", ")}`);
+    if (byPath.length) this.insertMentions(byPath);
+    if (failed.length) new Notice(`Couldn't attach ${failed.join(", ")}: drop it from your file manager or save it to disk first.`);
     this.renderAttachments();
+  }
+
+  private insertMentions(paths: string[]): void {
+    const { selectionStart: start, selectionEnd: end, value } = this.input;
+    const before = start > 0 && !/\s/.test(value[start - 1]!) ? " " : "";
+    this.input.setRangeText(`${before}${paths.map(mentionFor).join(" ")} `, start, end, "end");
+    this.input.focus();
+    this.onInput();
   }
 
   private renderAttachments(): void {
     this.attachmentsEl.empty();
     this.attachments.forEach((a, i) => {
-      const item = this.attachmentsEl.createDiv({ cls: "cw-attachment" });
-      item.createEl("img", { attr: { src: `data:${a.mediaType};base64,${a.data}`, alt: a.name } });
-      const x = item.createEl("button", { cls: "cw-attachment-remove", attr: { "aria-label": "Remove image" } });
+      const item = this.attachmentsEl.createDiv({ cls: `cw-attachment cw-attachment-${a.kind}` });
+      if (a.kind === "image") item.createEl("img", { attr: { src: `data:${a.mediaType};base64,${a.data}`, alt: a.name } });
+      else {
+        setIcon(item.createSpan({ cls: "cw-attachment-icon" }), "file-text");
+        const text = item.createDiv({ cls: "cw-attachment-text" });
+        text.createDiv({ cls: "cw-attachment-name", text: a.name });
+        text.createDiv({ cls: "cw-attachment-size", text: `PDF · ${formatSize(a.size)}` });
+      }
+      const x = item.createEl("button", { cls: "cw-attachment-remove", attr: { "aria-label": `Remove ${a.name}` } });
       setIcon(x, "x");
       x.onclick = () => {
         this.attachments.splice(i, 1);
@@ -1117,4 +1172,15 @@ function suggestionsFor(ctx: ActiveContext | null, excalidraw: boolean): { icon:
     { icon: "search", text: "What's in this vault?" },
     { icon: "file-plus", text: "Create a note for today's ideas" },
   ];
+}
+
+async function toBase64(file: File): Promise<string> {
+  const buf = new Uint8Array(await file.arrayBuffer());
+  let bin = "";
+  for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+
+function formatSize(bytes: number): string {
+  return bytes >= 1024 * 1024 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1024))} KB`;
 }

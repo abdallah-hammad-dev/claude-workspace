@@ -97,6 +97,12 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   big ones itself; a 43 MB 7680×4320 PNG worked). Pastes over 800 chars or 12 lines become
   `[Pasted text #n +L lines]` in the composer and are expanded on send (`paste.ts`), like Claude Code; the
   bubble shows them as chips. Long user messages (e.g. from history) fold with "Show more".
+- **Files and drags** (`drop.ts`): PDFs ≤10 MB are sent as `document` blocks (verified with real Claude Code);
+  other files and bigger PDFs are referenced by path like Claude Code's terminal drop — `@vault/relative` inside
+  the vault, `@"absolute"` outside (Claude Code loads @-mentioned files itself). OS paths come from Electron's
+  `webUtils.getPathForFile` (`File.path` is gone since Electron 32). Notes/files dragged out of Obsidian carry
+  documented `obsidian://open?vault=…&file=…` URIs in `text/uri-list` (no `.md`); folders only their path in
+  `text/plain`. Local commands (`/model`…) run even with attachments, which wait for the next message.
 - **Icons**: only Lucide names that exist in Obsidian's bundled set (checked against app.js: names appear as
   `"name":[[` or `name:[[`). The preview marks unknown icons red.
 

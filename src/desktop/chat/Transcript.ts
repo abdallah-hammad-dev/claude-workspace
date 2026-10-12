@@ -20,6 +20,8 @@ export interface UserImage {
 
 export interface UserMessageOptions {
   images?: UserImage[];
+  /** Names of documents (PDFs) sent with the message. */
+  documents?: string[];
   /** Pastes behind `[Pasted text #n]` placeholders in the text (shown collapsed). */
   pastes?: ReadonlyMap<number, string>;
   /** Wait for the hook's context to show it under the message (false for slash commands, "instead" replies). */
@@ -65,6 +67,14 @@ export class Transcript {
     if (opts.label) turn.createDiv({ cls: "cw-user-label", text: opts.label });
     const bubble = turn.createDiv({ cls: "cw-user-bubble" });
     if (text) this.renderUserText(bubble, text, opts.pastes ?? new Map());
+    if (opts.documents?.length) {
+      const row = bubble.createDiv({ cls: "cw-user-files" });
+      for (const name of opts.documents) {
+        const chip = row.createDiv({ cls: "cw-user-file" });
+        setIcon(chip.createSpan({ cls: "cw-user-file-icon" }), "file-text");
+        chip.createSpan({ text: name });
+      }
+    }
     if (opts.images?.length) {
       const row = bubble.createDiv({ cls: "cw-user-images" });
       for (const img of opts.images) {
@@ -214,7 +224,7 @@ export class Transcript {
         return;
       }
       if (Array.isArray(message.content)) {
-        const blocks = message.content as { type: string; text?: string; source?: { type?: string; media_type?: string; data?: string } }[];
+        const blocks = message.content as { type: string; text?: string; title?: string; source?: { type?: string; media_type?: string; data?: string } }[];
         const text = blocks
           .filter((b) => b.type === "text")
           .map((t) => t.text ?? "")
@@ -222,7 +232,10 @@ export class Transcript {
         const images = blocks
           .filter((b) => b.type === "image" && b.source?.type === "base64" && b.source.data)
           .map((b) => ({ mediaType: b.source!.media_type ?? "image/png", data: b.source!.data! }));
-        if ((text && !text.startsWith("<")) || images.length) this.addUser(text.startsWith("<") ? "" : text, { expectContext: false, images });
+        const documents = blocks.filter((b) => b.type === "document").map((b) => b.title || "PDF document");
+        if ((text && !text.startsWith("<")) || images.length || documents.length) {
+          this.addUser(text.startsWith("<") ? "" : text, { expectContext: false, images, documents });
+        }
         this.onUser({ type: "user", message: message as never, parent_tool_use_id: null });
       }
     } else if (m.type === "assistant") {

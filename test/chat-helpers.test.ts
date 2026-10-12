@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseApplied, readAppliedSettings } from "../src/desktop/chat/applied-settings";
+import { mentionFor, obsidianUriPaths } from "../src/desktop/chat/drop";
 import { parseLocalCommand } from "../src/desktop/chat/local-commands";
 import { relativeTime } from "../src/desktop/chat/modals";
 import { expandPastes, pastePlaceholder, shouldCollapse, splitPastes } from "../src/desktop/chat/paste";
@@ -175,6 +176,24 @@ describe("long pastes", () => {
     expect(expandPastes("Explain [Pasted text #1 +40 lines] please", pastes)).toBe(`Explain ${log} please`);
     expect(expandPastes("[Pasted text #2] stays", pastes)).toBe("[Pasted text #2] stays");
     expect(splitPastes("a [Pasted text #1 +40 lines] b", pastes)).toEqual([{ text: "a " }, { paste: 1, content: log }, { text: " b" }]);
+  });
+});
+
+describe("dropping files", () => {
+  it("reads vault paths from Obsidian's drag URIs, only for this vault", () => {
+    const list = [
+      "obsidian://open?vault=linux-vault&file=Welcome",
+      "obsidian://open?vault=linux-vault&file=Projects%2FSub%20folder%2FMy%20note",
+      "obsidian://open?vault=other&file=Secret",
+      "https://example.com",
+    ].join("\r\n");
+    expect(obsidianUriPaths(list, "linux-vault")).toEqual(["Welcome", "Projects/Sub folder/My note"]);
+    expect(obsidianUriPaths("", "linux-vault")).toEqual([]);
+  });
+
+  it("quotes mentions with spaces", () => {
+    expect(mentionFor("Projects/Alpha.md")).toBe("@Projects/Alpha.md");
+    expect(mentionFor("Projects/Sub folder/My note.md")).toBe('@"Projects/Sub folder/My note.md"');
   });
 });
 

@@ -301,7 +301,7 @@ async function renderChat(): Promise<void> {
       g.fillStyle = grad;
       g.fillRect(0, 0, 320, 200);
       const png = canvas.toDataURL("image/png").split(",")[1]!;
-      t.addUser("What's wrong in this screenshot?", { images: [{ mediaType: "image/png", data: png }, { mediaType: "image/png", data: png }] }).setContext(["Alpha.md"], CONTEXT_TEXT);
+      t.addUser("What's wrong in this screenshot? Compare with the report.", { images: [{ mediaType: "image/png", data: png }, { mediaType: "image/png", data: png }], documents: ["Q3 report.pdf"] }).setContext(["Alpha.md"], CONTEXT_TEXT);
       t.addUser(Array.from({ length: 30 }, (_, i) => `Paragraph ${i + 1} of a long message typed or resumed from history.`).join("\n"), { expectContext: false });
       (view.contentEl.querySelector(".cw-paste-chip") as HTMLElement | null)?.click();
       view.input.focus();
@@ -310,6 +310,8 @@ async function renderChat(): Promise<void> {
       view.input.value = "Compare with ";
       view.input.setSelectionRange(13, 13);
       view.input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+      view.attachments.push({ kind: "pdf", name: "Quarterly report 2026.pdf", data: "", size: 2_400_000 }, { kind: "image", mediaType: "image/png", name: "shot.png", data: png });
+      view.renderAttachments();
       break;
     }
     case "chat-defaults":

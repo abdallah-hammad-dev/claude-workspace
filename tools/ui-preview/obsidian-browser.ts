@@ -164,6 +164,10 @@ export class Notice {
   }
 }
 
+export class TFolder {
+  path = "";
+}
+
 export class TFile {
   constructor(public path: string) {}
   get name(): string {
