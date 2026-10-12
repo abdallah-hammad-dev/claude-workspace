@@ -287,6 +287,31 @@ async function renderChat(): Promise<void> {
       view.setBusy(false);
       view.modeBtn.click();
       break;
+    case "chat-paste": {
+      view.showTranscript();
+      const log = Array.from({ length: 40 }, (_, i) => `2026-10-12 10:${String(i).padStart(2, "0")} ERROR sync failed: ETIMEDOUT (attempt ${i + 1})`).join("\n");
+      t.addUser("Explain this log [Pasted text #1 +40 lines] and tell me what to fix", { pastes: new Map([[1, log]]) }).setContext(["Alpha.md"], CONTEXT_TEXT);
+      const canvas = document.createElement("canvas");
+      canvas.width = 320;
+      canvas.height = 200;
+      const g = canvas.getContext("2d")!;
+      const grad = g.createLinearGradient(0, 0, 320, 200);
+      grad.addColorStop(0, "#7c3aed");
+      grad.addColorStop(1, "#38bdf8");
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 320, 200);
+      const png = canvas.toDataURL("image/png").split(",")[1]!;
+      t.addUser("What's wrong in this screenshot?", { images: [{ mediaType: "image/png", data: png }, { mediaType: "image/png", data: png }] }).setContext(["Alpha.md"], CONTEXT_TEXT);
+      t.addUser(Array.from({ length: 30 }, (_, i) => `Paragraph ${i + 1} of a long message typed or resumed from history.`).join("\n"), { expectContext: false });
+      (view.contentEl.querySelector(".cw-paste-chip") as HTMLElement | null)?.click();
+      view.input.focus();
+      const dt = new DataTransfer();
+      dt.setData("text/plain", log);
+      view.input.value = "Compare with ";
+      view.input.setSelectionRange(13, 13);
+      view.input.dispatchEvent(new ClipboardEvent("paste", { clipboardData: dt, bubbles: true, cancelable: true }));
+      break;
+    }
     case "chat-defaults":
       view.warm();
       await tick(100);

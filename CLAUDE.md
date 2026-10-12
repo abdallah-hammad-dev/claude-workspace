@@ -93,6 +93,10 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   `ModelInfo.resolvedModel`); the effort button shows the level Claude Code really applies, from the
   **undocumented** `Query.getSettings().applied` (isolated in `applied-settings.ts`, degrades to "Default";
   the e2e test asserts it still works).
+- **Images and long pastes**: pasted/dropped PNG/JPEG/GIF/WebP go as base64 image blocks (Claude Code downsizes
+  big ones itself; a 43 MB 7680×4320 PNG worked). Pastes over 800 chars or 12 lines become
+  `[Pasted text #n +L lines]` in the composer and are expanded on send (`paste.ts`), like Claude Code; the
+  bubble shows them as chips. Long user messages (e.g. from history) fold with "Show more".
 - **Icons**: only Lucide names that exist in Obsidian's bundled set (checked against app.js: names appear as
   `"name":[[` or `name:[[`). The preview marks unknown icons red.
 

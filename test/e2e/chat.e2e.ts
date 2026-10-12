@@ -16,6 +16,27 @@ import { ChatSession } from "../../src/desktop/chat/ChatSession";
 import { mergeClaudeSettings, mergeMcpJson } from "../../src/desktop/installer-merge";
 import { McpHost, SERVER_NAME, type ServedContext } from "../../src/desktop/McpHost";
 import { existsSync, statSync } from "node:fs";
+import { crc32, deflateSync } from "node:zlib";
+
+/** A solid-color PNG, built by hand (no image library in the test deps). */
+function solidPng(w: number, h: number, [r, g, b]: [number, number, number]): string {
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, "ascii"), data]);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8);
+  const row = Buffer.concat([Buffer.from([0]), Buffer.alloc(w * 3).fill(Buffer.from([r, g, b]))]);
+  const raw = Buffer.concat(Array.from({ length: h }, () => row));
+  const png = Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk("IHDR", ihdr), chunk("IDAT", deflateSync(raw)), chunk("IEND", Buffer.alloc(0))]);
+  return png.toString("base64");
+}
 
 const claudePath = process.env.CLAUDE_PATH ?? locateClaude({
   platform: process.platform,
@@ -139,6 +160,15 @@ describe.skipIf(!claudePath)("chat e2e (real Claude Code)", () => {
     expect(finalText(t3)).toContain("pineapple-42");
     expect(served).toHaveLength(3);
 
+    // Images go through as content blocks, the way the composer sends a pasted screenshot.
+    session.send([
+      { type: "image", source: { type: "base64", media_type: "image/png", data: solidPng(64, 64, [220, 20, 20]) } },
+      { type: "text", text: "What color is this image? One word." },
+    ]);
+    const t3b = await runTurn(session, messages);
+    expect(finalText(t3b).toLowerCase()).toContain("red");
+    expect(served).toHaveLength(4);
+
     const id = session.sessionId!;
     session.close();
 
@@ -147,7 +177,7 @@ describe.skipIf(!claudePath)("chat e2e (real Claude Code)", () => {
     const t4 = await runTurn(resumed, messages);
     expect(finalText(t4)).toContain("pineapple");
     expect(resumed.sessionId).toBe(id);
-    expect(served).toHaveLength(4);
+    expect(served).toHaveLength(5);
     resumed.close();
     expect(ended.filter(Boolean)).toEqual([]);
   }, 240_000);

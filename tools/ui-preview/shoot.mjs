@@ -37,6 +37,7 @@ const SCENARIOS = [
   ["chat-mode-menu", 420, 860],
   ["chat-effort-menu", 420, 860],
   ["chat-defaults", 420, 860],
+  ["chat-paste", 420, 1100],
   ["chat-context-preview", 420, 860],
   ["settings", 760, 1900],
 ];

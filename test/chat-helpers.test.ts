@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { parseApplied, readAppliedSettings } from "../src/desktop/chat/applied-settings";
 import { parseLocalCommand } from "../src/desktop/chat/local-commands";
 import { relativeTime } from "../src/desktop/chat/modals";
+import { expandPastes, pastePlaceholder, shouldCollapse, splitPastes } from "../src/desktop/chat/paste";
 import { argChoices, argQuery, filterCommands, filterFiles, mentionQuery, slashQuery } from "../src/desktop/chat/suggest";
 import { describeSuggestions, permissionAsk, relPath } from "../src/desktop/chat/tool-render";
 
@@ -155,6 +156,25 @@ describe("applied settings (undocumented getSettings)", () => {
     expect(await readAppliedSettings({ getSettings: async () => { throw new Error("unknown control request"); } })).toBeNull();
     expect(parseApplied({ effective: {} })).toBeNull();
     expect(parseApplied({ applied: { model: 42, effort: "turbo" } })).toEqual({});
+  });
+});
+
+describe("long pastes", () => {
+  const log = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`).join("\n");
+
+  it("collapses long or many-line pastes only", () => {
+    expect(shouldCollapse(log)).toBe(true);
+    expect(shouldCollapse("x".repeat(900))).toBe(true);
+    expect(shouldCollapse("a short sentence\nand another")).toBe(false);
+    expect(pastePlaceholder(1, log)).toBe("[Pasted text #1 +40 lines]");
+    expect(pastePlaceholder(2, "x".repeat(900))).toBe("[Pasted text #2]");
+  });
+
+  it("expands placeholders on send, keeps unknown or deleted ones as typed", () => {
+    const pastes = new Map([[1, log]]);
+    expect(expandPastes("Explain [Pasted text #1 +40 lines] please", pastes)).toBe(`Explain ${log} please`);
+    expect(expandPastes("[Pasted text #2] stays", pastes)).toBe("[Pasted text #2] stays");
+    expect(splitPastes("a [Pasted text #1 +40 lines] b", pastes)).toEqual([{ text: "a " }, { paste: 1, content: log }, { text: " b" }]);
   });
 });
 

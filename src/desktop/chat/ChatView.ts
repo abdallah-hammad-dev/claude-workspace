@@ -19,6 +19,7 @@ import type { HostState, ServedContext } from "../McpHost";
 import type { AppliedSettings } from "./applied-settings";
 import { ChatSession } from "./ChatSession";
 import { EFFORTS, parseLocalCommand } from "./local-commands";
+import { expandPastes, pastePlaceholder, shouldCollapse } from "./paste";
 import { SessionPickerModal, sessionTitle } from "./modals";
 import { PromptDock } from "./PromptDock";
 import { argChoices, argQuery, filterCommands, filterFiles, InlineSuggest, mentionQuery, slashQuery, type SuggestItem } from "./suggest";
@@ -106,6 +107,9 @@ export class ChatView extends ItemView {
   private effortBtn!: HTMLButtonElement;
   private usageEl!: HTMLElement;
   private attachments: Attachment[] = [];
+  /** Long pastes shown as `[Pasted text #n]` in the composer, expanded on send. */
+  private pastes = new Map<number, string>();
+  private pasteSeq = 0;
   private busy = false;
   private stickToBottom = true;
   /** Messages waiting for the hook's context (in send order). */
@@ -252,13 +256,15 @@ export class ChatView extends ItemView {
   // ───────────────────────── sending ─────────────────────────
 
   private submit(): void {
-    const text = this.input.value.trim();
+    const raw = this.input.value.trim();
+    const text = expandPastes(raw, this.pastes);
+    const pastes = new Map(this.pastes);
 
     // A card is waiting: the text answers it ("do this instead").
     if (this.dock.pending) {
       if (!text) return;
       this.showTranscript();
-      this.transcript.addUser(text, { expectContext: false, label: "Instead" });
+      this.transcript.addUser(raw, { expectContext: false, label: "Instead", pastes });
       this.clearInput();
       this.dock.answerWithText(text);
       return;
@@ -284,10 +290,12 @@ export class ChatView extends ItemView {
 
     this.showTranscript();
     const isCommand = text.startsWith("/");
-    const bubble = this.transcript.addUser(text, { images: this.attachments.length, expectContext: !isCommand });
+    const images = this.attachments.map((a) => ({ mediaType: a.mediaType, data: a.data }));
+    const bubble = this.transcript.addUser(raw, { images, pastes, expectContext: !isCommand });
     if (!isCommand) this.pendingBubbles.push(bubble);
     if (this.headerTitleEl.getText() === "New conversation" && text && !isCommand) {
-      this.headerTitleEl.setText(text.length > 60 ? `${text.slice(0, 60)}…` : text);
+      const title = text.replace(/\s+/g, " ").trim();
+      this.headerTitleEl.setText(title.length > 60 ? `${title.slice(0, 60)}…` : title);
     }
     this.clearInput();
     this.stickToBottom = true;
@@ -844,6 +852,8 @@ export class ChatView extends ItemView {
 
   private clearInput(): void {
     this.input.value = "";
+    this.pastes.clear();
+    this.pasteSeq = 0;
     this.attachments = [];
     this.renderAttachments();
     this.suggest.hide();
@@ -853,9 +863,18 @@ export class ChatView extends ItemView {
 
   private onPaste(e: ClipboardEvent): void {
     const files = [...(e.clipboardData?.files ?? [])].filter((f) => f.type.startsWith("image/"));
-    if (!files.length) return;
+    if (files.length) {
+      e.preventDefault();
+      void this.addImages(files);
+      return;
+    }
+    const text = e.clipboardData?.getData("text/plain") ?? "";
+    if (!shouldCollapse(text)) return;
     e.preventDefault();
-    void this.addImages(files);
+    const id = ++this.pasteSeq;
+    this.pastes.set(id, text);
+    this.input.setRangeText(pastePlaceholder(id, text), this.input.selectionStart, this.input.selectionEnd, "end");
+    this.onInput();
   }
 
   private onDrop(e: DragEvent): void {
@@ -866,14 +885,19 @@ export class ChatView extends ItemView {
   }
 
   private async addImages(files: File[]): Promise<void> {
+    const skipped: string[] = [];
     for (const f of files) {
       const mediaType = f.type as Attachment["mediaType"];
-      if (!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mediaType)) continue;
+      if (!["image/png", "image/jpeg", "image/gif", "image/webp"].includes(mediaType)) {
+        skipped.push(f.name || f.type);
+        continue;
+      }
       const buf = new Uint8Array(await f.arrayBuffer());
       let bin = "";
       for (let i = 0; i < buf.length; i += 0x8000) bin += String.fromCharCode(...buf.subarray(i, i + 0x8000));
       this.attachments.push({ mediaType, data: btoa(bin), name: f.name || "image" });
     }
+    if (skipped.length) new Notice(`Claude reads PNG, JPEG, GIF and WebP images. Not added: ${skipped.join(", ")}`);
     this.renderAttachments();
   }
 

@@ -1,6 +1,7 @@
 import { Keymap, MarkdownRenderer, TFile, setIcon, type App, type Component } from "obsidian";
 import type { SDKAssistantMessage, SDKPartialAssistantMessage, SDKUserMessage } from "@anthropic-ai/claude-agent-sdk";
 import { toVaultPath } from "../../core/paths";
+import { lineCount, splitPastes } from "./paste";
 import { displayToolName, renderToolInput, toolFilePath, toolIcon, toolResultText, toolSummary } from "./tool-render";
 
 type Block =
@@ -11,8 +12,16 @@ type Block =
 const RENDER_THROTTLE_MS = 80;
 const MAX_RESULT_CHARS = 4000;
 
+export interface UserImage {
+  mediaType: string;
+  /** base64 */
+  data: string;
+}
+
 export interface UserMessageOptions {
-  images?: number;
+  images?: UserImage[];
+  /** Pastes behind `[Pasted text #n]` placeholders in the text (shown collapsed). */
+  pastes?: ReadonlyMap<number, string>;
   /** Wait for the hook's context to show it under the message (false for slash commands, "instead" replies). */
   expectContext?: boolean;
   /** Small label above the bubble, e.g. "Instead". */
@@ -55,19 +64,51 @@ export class Transcript {
     const turn = this.el.createDiv({ cls: "cw-user-turn" });
     if (opts.label) turn.createDiv({ cls: "cw-user-label", text: opts.label });
     const bubble = turn.createDiv({ cls: "cw-user-bubble" });
-    const command = /^\/\S+/.exec(text);
-    if (command) {
-      bubble.createSpan({ cls: "cw-user-command", text: command[0] });
-      bubble.appendText(text.slice(command[0].length));
-    } else bubble.setText(text);
-    if (opts.images) {
-      const att = bubble.createDiv({ cls: "cw-user-attachments" });
-      setIcon(att.createSpan(), "image");
-      att.createSpan({ text: `${opts.images} image${opts.images > 1 ? "s" : ""}` });
+    if (text) this.renderUserText(bubble, text, opts.pastes ?? new Map());
+    if (opts.images?.length) {
+      const row = bubble.createDiv({ cls: "cw-user-images" });
+      for (const img of opts.images) {
+        const el = row.createEl("img", { attr: { src: `data:${img.mediaType};base64,${img.data}`, alt: "Attached image" } });
+        el.onclick = () => el.toggleClass("is-expanded", !el.hasClass("is-expanded"));
+      }
     }
     const meta = turn.createDiv({ cls: "cw-user-meta" });
     this.onScroll();
     return new UserBubble(meta, opts.expectContext !== false);
+  }
+
+  /** Slash command highlighted, pastes as chips that open in place, long text folded. */
+  private renderUserText(bubble: HTMLElement, text: string, pastes: ReadonlyMap<number, string>): void {
+    const body = bubble.createDiv({ cls: "cw-user-text" });
+    splitPastes(text, pastes).forEach((seg, i) => {
+      if ("text" in seg) {
+        const command = i === 0 ? /^\/\S+/.exec(seg.text) : null;
+        if (command) body.createSpan({ cls: "cw-user-command", text: command[0] });
+        body.appendText(command ? seg.text.slice(command[0].length) : seg.text);
+        return;
+      }
+      const lines = lineCount(seg.content);
+      const chip = body.createEl("button", { cls: "cw-paste-chip", attr: { "aria-expanded": "false" } });
+      setIcon(chip.createSpan({ cls: "cw-paste-chip-icon" }), "clipboard-paste");
+      chip.createSpan({ text: `Pasted text · ${lines} line${lines > 1 ? "s" : ""}` });
+      let pre: HTMLElement | null = null;
+      chip.onclick = () => {
+        pre ??= bubble.createEl("pre", { cls: "cw-paste-content", text: seg.content });
+        const open = chip.getAttribute("aria-expanded") !== "true";
+        chip.setAttr("aria-expanded", String(open));
+        pre.toggle(open);
+      };
+    });
+    // Long messages (e.g. a big paste in a resumed conversation) fold to a few lines.
+    if (!pastes.size && (lineCount(text) > 12 || text.length > 1500)) {
+      body.addClass("is-clamped");
+      const more = bubble.createEl("button", { cls: "cw-user-more", text: "Show more" });
+      more.onclick = () => {
+        const clamped = body.hasClass("is-clamped");
+        body.toggleClass("is-clamped", !clamped);
+        more.setText(clamped ? "Show less" : "Show more");
+      };
+    }
   }
 
   addNote(text: string, kind: "info" | "error" | "divider" = "info"): HTMLElement {
@@ -173,9 +214,15 @@ export class Transcript {
         return;
       }
       if (Array.isArray(message.content)) {
-        const texts = (message.content as { type: string; text?: string }[]).filter((b) => b.type === "text");
-        const text = texts.map((t) => t.text ?? "").join("\n");
-        if (text && !text.startsWith("<")) this.addUser(text, { expectContext: false });
+        const blocks = message.content as { type: string; text?: string; source?: { type?: string; media_type?: string; data?: string } }[];
+        const text = blocks
+          .filter((b) => b.type === "text")
+          .map((t) => t.text ?? "")
+          .join("\n");
+        const images = blocks
+          .filter((b) => b.type === "image" && b.source?.type === "base64" && b.source.data)
+          .map((b) => ({ mediaType: b.source!.media_type ?? "image/png", data: b.source!.data! }));
+        if ((text && !text.startsWith("<")) || images.length) this.addUser(text.startsWith("<") ? "" : text, { expectContext: false, images });
         this.onUser({ type: "user", message: message as never, parent_tool_use_id: null });
       }
     } else if (m.type === "assistant") {

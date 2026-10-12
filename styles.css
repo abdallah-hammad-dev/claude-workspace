@@ -202,17 +202,87 @@ button.cw-empty-suggestion:hover {
   font-weight: var(--font-semibold);
   color: var(--text-accent);
 }
-.cw-user-attachments {
-  display: flex;
+.cw-user-text.is-clamped {
+  max-height: calc(1.5em * 10);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 65%, transparent);
+  mask-image: linear-gradient(to bottom, #000 65%, transparent);
+}
+button.cw-user-more {
+  display: block;
+  height: auto;
+  margin-top: 4px;
+  padding: 0;
+  background: none;
+  box-shadow: none;
+  font-size: var(--font-ui-smaller);
+  color: var(--text-accent);
+  cursor: pointer;
+}
+button.cw-paste-chip {
+  display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-top: 4px;
+  height: auto;
+  margin: 1px 2px;
+  padding: 1px 8px;
+  border: 1px solid var(--cw-border);
+  border-radius: 6px;
+  background: var(--background-primary);
+  box-shadow: none;
   font-size: var(--font-ui-smaller);
+  font-weight: normal;
   color: var(--text-muted);
+  vertical-align: baseline;
+  cursor: pointer;
 }
-.cw-user-attachments svg {
-  width: 13px;
-  height: 13px;
+button.cw-paste-chip:hover,
+button.cw-paste-chip[aria-expanded="true"] {
+  color: var(--text-normal);
+  border-color: var(--background-modifier-border-hover);
+}
+.cw-paste-chip-icon {
+  display: flex;
+}
+.cw-paste-chip-icon svg {
+  width: 12px;
+  height: 12px;
+}
+pre.cw-paste-content {
+  max-height: 280px;
+  margin: 6px 0 0;
+  padding: 8px 10px;
+  overflow: auto;
+  border: 1px solid var(--cw-border);
+  border-radius: 8px;
+  background: var(--background-primary);
+  font-family: var(--font-monospace);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+.cw-user-images {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.cw-user-text + .cw-user-images,
+.cw-user-more + .cw-user-images {
+  margin-top: 6px;
+}
+.cw-user-images img {
+  height: 72px;
+  max-width: 160px;
+  object-fit: cover;
+  border-radius: 8px;
+  cursor: zoom-in;
+}
+.cw-user-images img.is-expanded {
+  height: auto;
+  max-width: 100%;
+  object-fit: contain;
+  cursor: zoom-out;
 }
 .cw-user-meta {
   display: flex;
