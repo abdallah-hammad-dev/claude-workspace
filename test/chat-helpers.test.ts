@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { apiErrorNote } from "../src/desktop/chat/api-errors";
 import { parseApplied, readAppliedSettings } from "../src/desktop/chat/applied-settings";
 import { mentionFor, obsidianUriPaths } from "../src/desktop/chat/drop";
 import { parseLocalCommand } from "../src/desktop/chat/local-commands";
@@ -204,5 +205,12 @@ describe("relativeTime", () => {
     expect(relativeTime(now - 5 * 60_000, now)).toBe("5 min ago");
     expect(relativeTime(now - 3 * 3600_000, now)).toBe("3 h ago");
     expect(relativeTime(now - 2 * 86400_000, now)).toBe("2 days ago");
+  });
+});
+
+describe("API error notes", () => {
+  it("tells the user how to log Claude Code back in", () => {
+    expect(apiErrorNote("authentication_failed")).toMatch(/logged out.*claude auth login/);
+    expect(apiErrorNote("overloaded")).toBe("API error: overloaded");
   });
 });

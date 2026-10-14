@@ -17,6 +17,7 @@ import type { ModuleRegistry } from "../../core/ModuleRegistry";
 import { toVaultPath } from "../../core/paths";
 import type { ChatPrefs, EffortLevel } from "../../core/settings";
 import type { HostState, ServedContext } from "../McpHost";
+import { apiErrorNote } from "./api-errors";
 import type { AppliedSettings } from "./applied-settings";
 import { ChatSession } from "./ChatSession";
 import { joinDictation } from "../voice/audio";
@@ -439,7 +440,7 @@ export class ChatView extends ItemView {
       case "assistant":
         this.transcript.onAssistant(m);
         if (!m.parent_tool_use_id) this.trackUsage(m.message.usage);
-        if (m.error) this.transcript.addNote(`API error: ${m.error}`, "error");
+        if (m.error) this.transcript.addNote(apiErrorNote(m.error), "error");
         break;
       case "user":
         this.transcript.onUser(m);
