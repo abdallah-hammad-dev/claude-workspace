@@ -24,6 +24,20 @@ export interface ChatPrefs {
   effort: EffortLevel | "";
 }
 
+export interface VoicePrefs {
+  /** Show the mic in the chat. Off until the user turns voice input on. */
+  enabled: boolean;
+  /** OpenAI-compatible API base; the plugin calls `<url>/audio/transcriptions`. */
+  url: string;
+  model: string;
+  /** Name of the API key in Obsidian's keychain (app.secretStorage); the key itself is never stored here. */
+  secret: string;
+  /** Spoken language code; "" = detected by the service. */
+  language: string;
+  /** Send each phrase at pauses so text appears while talking; off = one request when the user stops. */
+  live: boolean;
+}
+
 /** Everything persisted in `.obsidian/plugins/claude-workspace/data.json`. */
 export interface PluginData {
   debug: boolean;
@@ -32,6 +46,7 @@ export interface PluginData {
   /** Override for the Claude Code executable; "" = auto-detect. */
   claudePath: string;
   chat: ChatPrefs;
+  voice: VoicePrefs;
   /** The chat panel is opened automatically once, so new users find it. */
   chatShownOnce: boolean;
 }
@@ -42,6 +57,8 @@ export const DEFAULT_DATA: PluginData = {
   server: { port: null, token: "" },
   claudePath: "",
   chat: { model: "", permissionMode: "default", effort: "" },
+  // Groq's free tier, prefilled; any OpenAI-compatible endpoint works (desktop/voice/providers.ts).
+  voice: { enabled: false, url: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo", secret: "", language: "", live: true },
   chatShownOnce: false,
 };
 
@@ -53,6 +70,7 @@ export function mergeData(saved: unknown): PluginData {
     modules: { ...(s.modules && typeof s.modules === "object" ? s.modules : {}) },
     server: { ...DEFAULT_DATA.server, ...s.server },
     chat: { ...DEFAULT_DATA.chat, ...s.chat },
+    voice: { ...DEFAULT_DATA.voice, ...s.voice },
   };
 }
 

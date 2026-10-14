@@ -4,6 +4,8 @@
  */
 import { ChatView, type ChatHost } from "../../src/desktop/chat/ChatView";
 import { renderConnectionSettings } from "../../src/desktop/connection-settings";
+import { renderVoiceSettings } from "../../src/desktop/voice/voice-settings";
+import type { VoiceService } from "../../src/desktop/voice/service";
 import { ModuleRegistry } from "../../src/core/ModuleRegistry";
 import { WorkspaceSettingTab, mergeData } from "../../src/core/settings";
 import { builtinModules } from "../../src/modules";
@@ -110,6 +112,18 @@ async function renderSettings(): Promise<void> {
           },
           refresh,
         ),
+      (el: HTMLElement, refresh: () => void) =>
+        renderVoiceSettings(
+          el,
+          {
+            app,
+            prefs: { ...data.voice, enabled: true, secret: "groq" },
+            setPrefs: async () => undefined,
+            hasKeychain: true,
+            check: async () => "api.groq.com answered in 0.4 s.",
+          },
+          refresh,
+        ),
     ],
   };
   const tab = new WorkspaceSettingTab(app, fakePlugin);
@@ -145,6 +159,7 @@ async function renderChat(): Promise<void> {
     onContextServed: () => () => undefined,
     openSettings() {},
     log: { debug() {}, info() {}, warn() {}, error: console.error },
+    voice: fakeVoice(),
   };
 
   const shell = document.body.createDiv({ cls: "workspace" });
@@ -325,6 +340,11 @@ async function renderChat(): Promise<void> {
       await view.changeEffort("high");
       view.effortBtn.click();
       break;
+    case "chat-voice":
+      view.input.value = "Summarize the three open tasks and";
+      view.mic.el.click();
+      await tick(400);
+      break;
     case "chat-context-preview":
       view.contextRowEl.querySelector("button")?.click();
       break;
@@ -332,6 +352,19 @@ async function renderChat(): Promise<void> {
       break;
   }
   await tick(100);
+}
+
+/** Voice input that "records" a steady level, for the mic button's states. */
+function fakeVoice(): VoiceService {
+  return {
+    isEnabled: () => scenario === "chat-voice",
+    isLive: () => true,
+    onChange: () => () => undefined,
+    ready: () => true,
+    record: async () => ({ level: () => 0.7, stop: async () => new Float32Array(16000), cancel() {} }),
+    transcribe: async () => "add a reminder to call the dentist on Friday",
+    describe: () => "api.groq.com · whisper-large-v3-turbo, last 0.4 s",
+  };
 }
 
 function tick(ms = 0): Promise<void> {

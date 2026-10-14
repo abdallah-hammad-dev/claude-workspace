@@ -32,6 +32,9 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   rows), PromptDock (inline permission / plan / question cards), suggest (`/` and `@` popup + pure filters),
   tool-render (icons, plain-language permission wording, diffs), modals (conversation picker).
 - `src/desktop/connection-settings.ts` — settings "Connection" section; no Node imports (preview-friendly).
+- `src/desktop/voice/` — voice input: `providers.ts` (pure: OpenAI-compatible request/response, defaults),
+  `audio.ts` (pure: WAV, silence check), `MicRecording.ts` (AudioWorklet capture), `index.ts` (service:
+  keychain, requestUrl), `voice-settings.ts`; the button is `chat/MicButton.ts`.
 - `src/core/setting-group.ts` — Obsidian 1.11+ `SettingGroup` markup, built by hand (works on older versions).
 - `tools/ui-preview/` — browser stand-in for `obsidian` + scenarios + screenshot script (dev only).
 - `src/modules/obsidian` (core tools, required), `src/modules/markdown` (cursor/section/selection).
@@ -110,6 +113,20 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   (verified: BRAT 2.2.0 installs 0.1.0 from the repo URL, no token) or manually. Tags have no `v` (`.npmrc`).
   CI (`.github/workflows/ci.yml`) runs lint/tests/build/mobile check on every push; e2e and UI screenshots stay
   local (need a Claude login / Obsidian install).
+- **Voice input** is opt-in (`voice.enabled`, default off: no mic, no command) and generic: any
+  OpenAI-compatible `POST <url>/audio/transcriptions`, set as endpoint URL + model + key (prefilled with Groq's
+  free tier; no per-provider code, OpenAI and self-hosted Whisper servers work the same). Claude Code's `/voice` is terminal-only and absent from the SDK command list
+  (verified on 2.1.296 Linux and Windows). Mic audio comes raw from an AudioWorklet at 16 kHz and is sent as a
+  16-bit WAV through `requestUrl` (no CORS). The API key lives in Obsidian's keychain (`app.secretStorage`,
+  1.11.4+, picked with `SecretComponent`); `data.json` stores only the secret's name. Silent recordings are not
+  sent. Logs: host, model and timings only, never audio, text or key. A local-Whisper version (transformers.js,
+  WebGPU) was built and dropped as too heavy: hundreds of MB of downloads, ~1 GB of RAM, +0.6 MB of bundle.
+  **Text at each pause** (`voice.live`, on by default): `PauseSplitter` (pure, `audio.ts`) cuts the take after
+  ≥3 s of speech + 1 s of quiet (0.5 s after 20 s), against an adaptive noise floor capped at 0.04 RMS; pieces
+  are sent in order with the end of the text so far as `prompt` (≤150 tokens). A failed piece and the ones after
+  it are held and sent with the rest at stop. Esc keeps typed text and drops the rest. Not word by word: Groq
+  has no streaming, OpenAI streams only finished files (live needs its Realtime API, provider-specific), and
+  re-sending audio every second would break Groq's free 20 requests/minute.
 - **Icons**: only Lucide names that exist in Obsidian's bundled set (checked against app.js: names appear as
   `"name":[[` or `name:[[`). The preview marks unknown icons red.
 

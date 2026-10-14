@@ -19,8 +19,11 @@ import type { ChatPrefs, EffortLevel } from "../../core/settings";
 import type { HostState, ServedContext } from "../McpHost";
 import type { AppliedSettings } from "./applied-settings";
 import { ChatSession } from "./ChatSession";
+import { joinDictation } from "../voice/audio";
+import type { VoiceService } from "../voice/service";
 import { mentionFor, obsidianUriPaths, osPathOf } from "./drop";
 import { EFFORTS, parseLocalCommand } from "./local-commands";
+import { MicButton } from "./MicButton";
 import { expandPastes, pastePlaceholder, shouldCollapse } from "./paste";
 import { SessionPickerModal, sessionTitle } from "./modals";
 import { PromptDock } from "./PromptDock";
@@ -87,6 +90,8 @@ export interface ChatHost {
   install(): Promise<void>;
   onContextServed(fn: (s: ServedContext) => void): Disposer;
   openSettings(): void;
+  /** Voice input (mic button); absent where it isn't available. */
+  voice?: VoiceService;
   log: Logger;
 }
 
@@ -110,6 +115,7 @@ export class ChatView extends ItemView {
   private modelBtn!: HTMLButtonElement;
   private effortBtn!: HTMLButtonElement;
   private usageEl!: HTMLElement;
+  private mic: MicButton | null = null;
   private attachments: Attachment[] = [];
   /** Long pastes shown as `[Pasted text #n]` in the composer, expanded on send. */
   private pastes = new Map<number, string>();
@@ -219,6 +225,8 @@ export class ChatView extends ItemView {
     this.effortBtn = footer.createEl("button", { cls: "cw-footer-btn" });
     footer.createDiv({ cls: "cw-spacer" });
     this.usageEl = footer.createDiv({ cls: "cw-usage" });
+    const voice = this.host.voice;
+    this.mic = voice ? new MicButton(footer, voice, (text) => this.insertDictation(text)) : null;
     this.sendBtn = footer.createEl("button", { cls: "cw-send" });
 
     this.modeBtn.onclick = () => this.openModeMenu();
@@ -247,6 +255,7 @@ export class ChatView extends ItemView {
 
     this.disposers.push(this.host.engine.onChange(() => void this.refreshContext()));
     this.disposers.push(this.host.onContextServed((s) => this.onServed(s)));
+    if (voice) this.disposers.push(voice.onChange(() => this.mic?.refresh()));
     this.updatePlaceholder();
     this.updateModeButton();
     this.updateModelButton();
@@ -261,6 +270,7 @@ export class ChatView extends ItemView {
   override async onClose(): Promise<void> {
     this.disposers.forEach((d) => d());
     this.disposers = [];
+    this.mic?.dispose();
     this.dock?.cancelAll();
     this.session?.close();
     this.session = null;
@@ -758,6 +768,13 @@ export class ChatView extends ItemView {
   // ───────────────────────── composer ─────────────────────────
 
   private onKeyDown(e: KeyboardEvent): void {
+    // While listening, Enter stops and transcribes (nothing is sent); Esc drops what isn't typed yet.
+    if (this.mic?.isRecording && (e.key === "Enter" || e.key === "Escape") && !e.isComposing) {
+      e.preventDefault();
+      if (e.key === "Escape") this.mic.cancel();
+      else void this.mic.toggle();
+      return;
+    }
     if (this.suggest.handleKey(e)) {
       e.preventDefault();
       return;
@@ -853,6 +870,23 @@ export class ChatView extends ItemView {
     if (!matches.length || matches.some((c) => c.value.toLowerCase() === q)) return null;
     const items = matches.map((c) => ({ insert: `${c.value} `, title: c.value, hint: c.value === current ? "current" : undefined, description: c.description }));
     return { items, selected: Math.max(0, matches.findIndex((c) => c.value === current)) };
+  }
+
+  /** Start or stop voice input (the mic button, or the "Start or stop voice input" command). */
+  toggleVoice(): void {
+    if (!this.mic) return;
+    this.input.focus();
+    void this.mic.toggle();
+  }
+
+  /** Dictated text goes in at the cursor, spaced from what's around it; you review it before sending. */
+  private insertDictation(text: string): void {
+    const { selectionStart: start, selectionEnd: end, value } = this.input;
+    const insert = joinDictation(value.slice(0, start), text, value.slice(end));
+    if (!insert) return;
+    this.input.setRangeText(insert, start, end, "end");
+    this.input.focus();
+    this.onInput();
   }
 
   private replaceRange(from: number, to: number, text: string): void {

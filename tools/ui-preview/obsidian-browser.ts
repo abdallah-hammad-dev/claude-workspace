@@ -345,6 +345,41 @@ class TextComponent extends ValueComponent<string> {
   }
 }
 
+class DropdownComponent extends ValueComponent<string> {
+  selectEl: HTMLSelectElement;
+  constructor(parent: HTMLElement) {
+    super();
+    this.selectEl = document.createElement("select");
+    this.selectEl.className = "dropdown";
+    parent.appendChild(this.selectEl);
+    this.selectEl.addEventListener("change", () => void this.cb?.(this.selectEl.value));
+  }
+  addOption(value: string, display: string): this {
+    this.selectEl.appendChild(Object.assign(document.createElement("option"), { value, textContent: display }));
+    return this;
+  }
+  setValue(v: string): this {
+    this.selectEl.value = v;
+    return this;
+  }
+}
+
+/** Obsidian 1.11's keychain picker: a button showing the chosen secret's name. */
+export class SecretComponent {
+  private button: HTMLButtonElement;
+  constructor(_app: unknown, parent: HTMLElement) {
+    this.button = document.createElement("button");
+    parent.appendChild(this.button);
+  }
+  setValue(v: string): this {
+    this.button.textContent = v || "Select a secret…";
+    return this;
+  }
+  onChange(_cb: (v: string | null) => unknown): this {
+    return this;
+  }
+}
+
 class ButtonComponent {
   buttonEl: HTMLButtonElement;
   constructor(parent: HTMLElement) {
@@ -407,8 +442,16 @@ export class Setting {
     cb(new TextComponent(this.controlEl, "textarea"));
     return this;
   }
+  addDropdown(cb: (d: DropdownComponent) => unknown): this {
+    cb(new DropdownComponent(this.controlEl));
+    return this;
+  }
   addButton(cb: (b: ButtonComponent) => unknown): this {
     cb(new ButtonComponent(this.controlEl));
+    return this;
+  }
+  addComponent(cb: (el: HTMLElement) => unknown): this {
+    cb(this.controlEl);
     return this;
   }
 }

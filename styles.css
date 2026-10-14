@@ -1277,6 +1277,29 @@ button.cw-send.is-stop svg {
   fill: currentColor;
 }
 
+/* Voice input: the mic shows a red dot that grows with your voice, then a spinner while transcribing. */
+button.cw-mic-btn.is-recording {
+  color: var(--text-error);
+  background: rgba(var(--color-red-rgb), 0.1);
+}
+button.cw-mic-btn.is-working {
+  color: var(--text-faint);
+}
+.cw-mic-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--color-red);
+  box-shadow: 0 0 0 calc(var(--cw-mic-level, 0) * 5px) rgba(var(--color-red-rgb), 0.28);
+  transition: box-shadow 0.1s linear;
+}
+.cw-mic-time {
+  font-variant-numeric: tabular-nums;
+}
+.cw-spin svg {
+  animation: cw-spin 0.9s linear infinite;
+}
 .cw-suggest {
   position: absolute;
   left: 12px;
@@ -1577,6 +1600,7 @@ button.cw-send.is-stop svg {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .cw-spin svg,
   .cw-tool-status.is-running svg,
   .cw-working-dot,
   .cw-thinking.is-running .cw-thinking-label {

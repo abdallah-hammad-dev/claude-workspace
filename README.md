@@ -27,6 +27,9 @@ inside your vault.
   - Other files and bigger PDFs are referenced by path.
   - Drag notes from Obsidian's file list to mention them.
   - Long pastes collapse to `[Pasted text #1 +40 lines]`, like in Claude Code.
+- **Voice input (optional, off by default).** Click the mic in the chat and talk; your words appear in the
+  message box at each pause, for you to review. Speech-to-text goes through any OpenAI-compatible API (prefilled with Groq's
+  free tier). See [Voice input](#voice-input).
 - **Works from a terminal too.** `claude` started in the vault gets the same context and the same Obsidian
   tools.
 - **Modules.** Features come as modules that you turn on or off in settings:
@@ -103,6 +106,37 @@ cp main.js manifest.json styles.css "<your vault>/.obsidian/plugins/claude-works
   `debug.log` sits next to it, and never contains tokens or note contents.
 - `.mcp.json` and `.claude/settings.json` contain the token. **Keep them out of git and out of any public sync.**
 
+## Voice input
+
+Off by default: there's no mic until you turn it on in **Settings → Claude Workspace → Voice input**.
+
+Then click the mic in the chat box and talk. Each time you pause for a second, what you just said is typed in
+the message box while you keep talking; click the mic again when you're done. You edit the text before sending.
+Enter also stops the recording (without sending), and Esc stops it and drops what isn't typed yet. The
+**Start or stop voice input** command can take a hotkey.
+
+- **Where the speech-to-text happens:** the recording (a WAV, about 2 MB per minute) is sent, one phrase at a
+  time, to the OpenAI-compatible API you set: an **endpoint URL** (the plugin calls `<URL>/audio/transcriptions`), a
+  **model** and an **API key**. For example:
+
+  | Service | Endpoint URL | Model | Key |
+  |---|---|---|---|
+  | Groq (prefilled; free tier with daily limits) | `https://api.groq.com/openai/v1` | `whisper-large-v3-turbo` | [console.groq.com/keys](https://console.groq.com/keys) |
+  | OpenAI (paid) | `https://api.openai.com/v1` | `whisper-1` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
+  | Your own server (e.g. a self-hosted Whisper) | its URL | its model name | if it needs one |
+- **The API key stays out of your vault.** It's kept in Obsidian's keychain (**Settings → Keychain**, Obsidian
+  1.11.4 or later). The plugin's settings only store the key's name.
+- **Nothing is recorded or sent** unless you click the mic. Silent recordings aren't sent.
+- **Phrase by phrase:** a phrase is sent after at least 3 s of speech and a 1 s pause, so one request every
+  4 s at most (Groq's free tier allows 20 a minute). Each phrase goes with the text before it, so sentences
+  continue in the same style. If a phrase fails (say, a rate limit), it's kept and sent with the rest when you
+  stop. Turn off **Type at each pause** to send everything in one request when you stop.
+- **Language:** detected by the service by default; pick yours in settings if short sentences come out wrong.
+- **Why not Claude Code's `/voice`?** It only works in a terminal: it records there and uses Anthropic's speech
+  service through your Claude login, which plugins can't reach.
+- **Microphone access:** if Obsidian can't use the mic, allow it in your system settings (Windows: Privacy &
+  security → Microphone → let desktop apps use it; macOS: Privacy & Security → Microphone → Obsidian).
+
 ## Safety and privacy
 
 - The plugin's server listens on `127.0.0.1` only. It requires a token and rejects browser requests.
@@ -110,6 +144,7 @@ cp main.js manifest.json styles.css "<your vault>/.obsidian/plugins/claude-works
   Start with *Ask before edits*. Don't use *Bypass permissions* on a vault you care about.
 - Your messages, the context block and anything Claude reads go to Anthropic through Claude Code, under your own
   account. That's the same as using Claude Code in a terminal.
+- With voice input on, your recordings go to the speech-to-text endpoint you set (Groq by default).
 
 ## How it works
 

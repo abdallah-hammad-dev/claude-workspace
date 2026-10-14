@@ -14,6 +14,7 @@ import { Installer } from "./Installer";
 import { mcpAddCommand, type InstallTarget } from "./installer-merge";
 import { renderConnectionSettings } from "./connection-settings";
 import { McpHost, SERVER_NAME, type ServedContext } from "./McpHost";
+import { createVoice } from "./voice";
 
 export interface DesktopServices {
   host: McpHost;
@@ -104,6 +105,30 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
     return locateClaude({ platform: process.platform, home: homedir(), env: process.env, isFile });
   };
 
+  const voiceLog = createLogger("voice", () => plugin.data.debug);
+  const openSettings = () => {
+    const setting = (app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
+    setting?.open();
+    setting?.openTabById(plugin.manifest.id);
+  };
+  const voice = createVoice({
+    app,
+    prefs: () => plugin.data.voice,
+    savePrefs: async (p) => {
+      plugin.data.voice = { ...plugin.data.voice, ...p };
+      await plugin.persist();
+    },
+    openSettings,
+    // Voice info lines (service, timings; never audio or text) also go to debug.log.
+    log: {
+      ...voiceLog,
+      info: (msg, ...meta) => {
+        voiceLog.info(msg, ...meta);
+        writeLog("info", `[voice] ${msg}`);
+      },
+    },
+  });
+
   const chatHost: ChatHost = {
     app,
     plugin,
@@ -137,12 +162,9 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
       servedListeners.add(fn);
       return () => servedListeners.delete(fn);
     },
-    openSettings: () => {
-      const setting = (app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
-      setting?.open();
-      setting?.openTabById(plugin.manifest.id);
-    },
+    openSettings,
     log: createLogger("chat", () => plugin.data.debug),
+    voice: voice.service,
   };
 
   plugin.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, chatHost));
@@ -161,6 +183,21 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
   });
   plugin.addCommand({ id: "open-chat", name: "Open chat", callback: () => void openChat(plugin, false) });
   plugin.addCommand({ id: "new-chat-tab", name: "New chat in a tab", callback: () => void openChat(plugin, true) });
+  plugin.addCommand({
+    id: "toggle-voice",
+    name: "Start or stop voice input",
+    // Only offered once voice input is turned on in settings.
+    checkCallback: (checking) => {
+      if (!voice.service.isEnabled()) return false;
+      if (!checking) {
+        void openChat(plugin, false).then(() => {
+          const view = app.workspace.getLeavesOfType(CHAT_VIEW_TYPE)[0]?.view;
+          if (view instanceof ChatView) view.toggleVoice();
+        });
+      }
+      return true;
+    },
+  });
   plugin.addCommand({ id: "install-claude-config", name: "Install Claude Code config in this vault", callback: () => void install() });
   plugin.addCommand({
     id: "copy-mcp-add-command",
@@ -202,6 +239,8 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
       refresh,
     ),
   );
+
+  plugin.coreSettingsSections.push((el, refresh) => voice.renderSettings(el, refresh));
 
   writeLog("info", `claude executable: ${resolveClaude() ?? "NOT FOUND"}`);
 
