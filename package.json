@@ -1,6 +1,6 @@
 {
   "name": "claude-workspace",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "description": "Obsidian as a workspace for Claude Code: live context, local MCP server, modules.",
   "type": "module",
