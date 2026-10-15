@@ -31,16 +31,17 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   commands/models before the first message), ChatView (layout, composer, pickers), Transcript (messages, tool
   rows), PromptDock (inline permission / plan / question cards), suggest (`/` and `@` popup + pure filters),
   tool-render (icons, plain-language permission wording, diffs), modals (conversation picker).
-- `src/desktop/connection-settings.ts` — settings "Connection" section; no Node imports (preview-friendly).
+- `src/desktop/connection-settings.ts` — settings "Connection" section (definitions + values); no Node imports
+  (preview-friendly).
 - `src/desktop/voice/` — voice input: `providers.ts` (pure: OpenAI-compatible request/response, defaults),
   `audio.ts` (pure: WAV, silence check), `MicRecording.ts` (AudioWorklet capture), `index.ts` (service:
   keychain, requestUrl), `voice-settings.ts`; the button is `chat/MicButton.ts`.
-- `src/core/setting-group.ts` — Obsidian 1.11+ `SettingGroup` markup, built by hand (works on older versions).
-- `tools/ui-preview/` — browser stand-in for `obsidian` + scenarios + screenshot script (dev only).
+- `tools/ui-preview/` — browser stand-in for `obsidian` (including a renderer for setting definitions modeled on
+  Obsidian's app.js) + scenarios + screenshot script (dev only).
 - `src/modules/obsidian` (core tools, required), `src/modules/markdown` (cursor/section/selection).
 - `src/core/module-api.ts` — the Module API (types only + `ToolError`). No MCP/Agent SDK types here.
 - `src/core/ModuleRegistry.ts` — loads modules, collects registrations, scoped disposal, change events.
-- `src/core/settings.ts` — persisted data shape + settings tab.
+- `src/core/settings.ts` — persisted data shape + declarative settings tab (`getSettingDefinitions`).
 - `src/modules/<id>/` — one folder per module; `src/modules/index.ts` lists built-ins.
 - `test/stubs/obsidian.ts` — runtime stub aliased as `obsidian` in Vitest. Tests import fakes from the stub
   directly (for stub-specific helpers); source code imports `obsidian`.
@@ -78,6 +79,18 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   (Excalidraw availability check).
 - **Settings show module contents** via `ModuleRegistry.contentsOf(id)`, computed from live registrations
   (only for loaded modules).
+- **Settings tab is declarative** (Obsidian 1.13 `getSettingDefinitions`, `minAppVersion` 1.13.2 for the
+  `secret` control). Obsidian renders and search-indexes the definitions. Values live in `plugin.data`, module
+  data and desktop services, not in `plugin.settings`, so each block returns `{ items, values }` (key → `get`/
+  `set`, with conversions such as port text ↔ number|null) and the tab's `getControlValue`/`setControlValue`
+  route by key. Module control keys become `modules.<id>.<key>`; the Module API's `SettingsSection` is
+  `items` + `values` (2026-10-15; was `display(el)`). `control` rows wherever a value is edited; `render` rows
+  only for custom UI: status rows, module badge + toggle, "what it adds", buttons (Obsidian's own tabs put
+  buttons in render rows too; `action` rows are for list entries). Verified in app.js 1.14.4: opening the tab
+  draws the definitions kept by the **last `update()`**, it does not re-read them, so the tab calls `update()`
+  on registry changes (debounced) and is added after the desktop sections exist. `update()` redraws rows in
+  place (same `Setting`, controls cleared): a render row with async work returns a cleanup that marks it stale.
+  Every control change is followed by `refreshDomState()` (voice rows use `visible` predicates).
 
 - **Prompts are inline cards** (PromptDock), not modals. Typing in the composer while a card is shown answers
   it ("do this instead" → deny with message; plan → feedback; question → free-text answer). Plan approval
@@ -118,7 +131,7 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   free tier; no per-provider code, OpenAI and self-hosted Whisper servers work the same). Claude Code's `/voice` is terminal-only and absent from the SDK command list
   (verified on 2.1.296 Linux and Windows). Mic audio comes raw from an AudioWorklet at 16 kHz and is sent as a
   16-bit WAV through `requestUrl` (no CORS). The API key lives in Obsidian's keychain (`app.secretStorage`,
-  1.11.4+, picked with `SecretComponent`); `data.json` stores only the secret's name. Silent recordings are not
+  picked with the settings' `secret` control); `data.json` stores only the secret's name. Silent recordings are not
   sent. Logs: host, model and timings only, never audio, text or key. A local-Whisper version (transformers.js,
   WebGPU) was built and dropped as too heavy: hundreds of MB of downloads, ~1 GB of RAM, +0.6 MB of bundle.
   **Text at each pause** (`voice.live`, on by default): `PauseSplitter` (pure, `audio.ts`) cuts the take after
@@ -136,14 +149,15 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
 - Agent SDK ≥0.3's "built-in executable" is a ~240 MB per-platform native binary — can't ship in a plugin.
   ChatView must always pass `pathToClaudeCodeExecutable` (auto-detected).
 - Agent SDK: omitting `permissionMode` may start in `auto`; pass `"default"` so `canUseTool` prompts appear.
-- `Plugin.removeCommand(id)` takes the id *without* the plugin prefix (Obsidian ≥1.7.2 → our `minAppVersion`).
+- `Plugin.removeCommand(id)` takes the id *without* the plugin prefix (Obsidian ≥1.7.2).
 - Obsidian `onunload` is sync; async cleanup is fire-and-forget.
 - `spawnClaudeCodeProcess`: never pass the SDK's AbortSignal to Node's spawn in Electron (realm mismatch);
   we kill on abort manually. Windows: spawn `claude.exe` or `cli.js`, never npm `.cmd` shims.
 - The HTTP hook fails "open" (default `onFailure: continue`): with Obsidian closed, terminal prompts still go
   through, just without context.
 - **Never declare class fields that shadow Obsidian base-class members** (`titleEl`, `contentEl`, `containerEl`,
-  `headerEl`, `icon`, `navigation`, `scope`, `modalEl`, `inputEl`…). With ES2022 define-semantics they reset the
+  `headerEl`, `icon`, `navigation`, `scope`, `modalEl`, `inputEl`, `Plugin.settings` since 1.13…). Our plugin
+  data is `plugin.data`. With ES2022 define-semantics they reset the
   base value to undefined after `super()`; `ChatView.titleEl` did exactly that and Obsidian's header update threw
   before `onOpen` ran (blank panel, no error in our log). tsconfig now has `useDefineForClassFields: false` too.
 - Electron realm: the SDK calls `events.setMaxListeners(n, abortSignal)` with a browser AbortSignal → Node throws

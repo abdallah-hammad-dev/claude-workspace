@@ -1,4 +1,4 @@
-import { Notice, Setting } from "obsidian";
+import { Notice } from "obsidian";
 import { z } from "zod";
 import type { WorkspaceModule } from "../../core/module-api";
 
@@ -40,13 +40,15 @@ export const helloModule: WorkspaceModule = {
 
     ctx.registerSettings({
       title: "Hello",
-      display: (el) => {
-        new Setting(el).setName("Greeting").addText((t) =>
-          t.setValue(settings.greeting).onChange(async (v) => {
-            settings.greeting = v;
+      items: [{ name: "Greeting", control: { type: "text", key: "greeting" } }],
+      values: {
+        greeting: {
+          get: () => settings.greeting,
+          set: async (v) => {
+            settings.greeting = String(v);
             await ctx.saveData(settings);
-          }),
-        );
+          },
+        },
       },
     });
 

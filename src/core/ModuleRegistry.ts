@@ -102,7 +102,7 @@ export class ModuleRegistry {
     if (!MODULE_ID.test(mod.id)) throw new Error(`Invalid module id "${mod.id}" (lowercase letters and digits)`);
     if (this.entries.has(mod.id)) throw new Error(`Module "${mod.id}" is already registered`);
     this.entries.set(mod.id, { mod, status: "pending", disposers: [] });
-    if (this.started) void this.enqueue(() => this.load(mod.id));
+    if (this.started) void this.enqueue(() => this.load(mod.id)).then(() => this.emit("modules"));
     this.emit("modules");
     return () => void this.remove(mod.id);
   }
@@ -120,6 +120,7 @@ export class ModuleRegistry {
     await this.enqueue(async () => {
       for (const id of this.entries.keys()) await this.load(id);
     });
+    this.emit("modules");
   }
 
   async stop(): Promise<void> {

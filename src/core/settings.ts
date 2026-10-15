@@ -1,7 +1,15 @@
-import { PluginSettingTab, Setting, setIcon, type App } from "obsidian";
+import {
+  debounce,
+  PluginSettingTab,
+  setIcon,
+  type App,
+  type SettingDefinition,
+  type SettingDefinitionGroup,
+  type SettingDefinitionItem,
+} from "obsidian";
 import type ClaudeWorkspacePlugin from "../main";
-import type { ModuleContents, ModuleStatus } from "./ModuleRegistry";
-import { settingGroup } from "./setting-group";
+import type { ControlValue, SettingsSection } from "./module-api";
+import type { ModuleContents, ModuleInfo, ModuleRegistry, ModuleStatus } from "./ModuleRegistry";
 
 export interface ModuleSettings {
   enabled?: boolean;
@@ -83,64 +91,136 @@ const BADGES: Record<ModuleStatus, { text: string; tone: string }> = {
   failed: { text: "Error", tone: "error" },
 };
 
-/** Extra settings sections contributed by the desktop layer (connection, installer). */
-export type CoreSettingsSection = (containerEl: HTMLElement, refresh: () => void) => void;
+/** Part of the settings tab: Obsidian setting definitions, and where the values of their `control` rows live, by key. */
+export interface SettingsBlock {
+  items: SettingDefinitionItem[];
+  values: Record<string, ControlValue>;
+}
 
+/** Settings added by the desktop layer (connection, voice input). `refresh` re-reads the definitions and redraws the tab. */
+export type CoreSettingsSection = (refresh: () => void) => SettingsBlock;
+
+/**
+ * Declarative settings tab (Obsidian 1.13+): Obsidian renders and indexes for search what
+ * `getSettingDefinitions()` returns. Values live in `plugin.data`, module data and the desktop
+ * services, not in `plugin.settings`, so controls go through `values` by key.
+ */
 export class WorkspaceSettingTab extends PluginSettingTab {
+  /** Rebuilt with the definitions. */
+  private values = new Map<string, ControlValue>();
+
   constructor(
     app: App,
     private readonly plugin: ClaudeWorkspacePlugin,
   ) {
     super(app, plugin);
+    this.containerEl.addClass("cw-settings");
+    // Obsidian draws the definitions kept by the last update(): re-read them when modules change.
+    const refresh = debounce(() => this.update(), 50, true);
+    plugin.register(plugin.registry.onChange(() => refresh()));
   }
 
-  override display(): void {
-    const { containerEl, plugin } = this;
-    containerEl.empty();
-    containerEl.addClass("cw-settings");
-    const refresh = () => this.display();
+  override getSettingDefinitions(): SettingDefinitionItem[] {
+    const refresh = () => this.update();
+    const blocks = [...this.plugin.coreSettingsSections.map((section) => section(refresh)), this.modules(), this.advanced()];
+    this.values = new Map(blocks.flatMap((b) => Object.entries(b.values)));
+    return blocks.flatMap((b) => b.items);
+  }
 
-    for (const section of plugin.coreSettingsSections) section(containerEl, refresh);
+  override getControlValue(key: string): unknown {
+    return this.values.get(key)?.get();
+  }
 
-    const intro = containerEl.createDiv({ cls: "cw-settings-section" });
-    intro.createDiv({ cls: "cw-settings-title", text: "Modules" });
-    intro.createDiv({ cls: "cw-settings-desc", text: "Each module gives Claude tools, context or skills for one part of Obsidian." });
-    for (const info of plugin.registry.list()) {
-      const list = settingGroup(containerEl, undefined, "cw-module-group");
-      const badge = info.required && info.status === "loaded" ? { text: "Always on", tone: "ok" } : BADGES[info.status];
-      new Setting(list)
-        .setName(
-          createFragment((f) => {
-            f.createSpan({ text: info.name });
-            f.createSpan({ cls: `cw-badge is-${badge.tone}`, text: badge.text });
-          }),
-        )
-        .setDesc(info.error ? `Error: ${info.error}` : (info.description ?? ""))
-        .addToggle((t) =>
-          t
-            .setValue(plugin.registry.isEnabled(info.id))
-            .setDisabled(info.status === "unsupported" || info.required)
-            .onChange(async (v) => {
-              await plugin.registry.setEnabled(info.id, v);
-              refresh();
-            }),
-        );
-      if (info.status !== "loaded") continue;
-      renderContents(list.createDiv({ cls: "setting-item cw-module-contents-row" }), plugin.registry.contentsOf(info.id));
-      for (const { section } of plugin.registry.getSettingsSections().filter((x) => x.moduleId === info.id)) section.display(list);
-    }
+  override async setControlValue(key: string, value: unknown): Promise<void> {
+    await this.values.get(key)?.set(value);
+  }
 
-    const advanced = settingGroup(containerEl, "Advanced");
-    new Setting(advanced)
-      .setName("Debug logging")
-      .setDesc("Log debug messages to the developer console. Never logs tokens or note contents.")
-      .addToggle((t) =>
-        t.setValue(plugin.data.debug).onChange(async (v) => {
-          plugin.data.debug = v;
-          await plugin.persist();
-        }),
+  /** One card per module: name and status, on/off, what it adds, its own settings. */
+  private modules(): SettingsBlock {
+    const { registry } = this.plugin;
+    const values: Record<string, ControlValue> = {};
+    const items = registry.list().map((info, i): SettingDefinitionGroup => {
+      const rows = [moduleRow(info, registry)];
+      if (info.status === "loaded") {
+        rows.push(contentsRow(registry.contentsOf(info.id)));
+        for (const { section } of registry.getSettingsSections().filter((x) => x.moduleId === info.id)) {
+          rows.push(...scoped(`modules.${info.id}`, section, values));
+        }
+      }
+      return { type: "group", heading: i === 0 ? "Modules" : undefined, cls: "cw-module-group", items: rows };
+    });
+    return { items, values };
+  }
+
+  private advanced(): SettingsBlock {
+    const { plugin } = this;
+    return {
+      items: [
+        {
+          type: "group",
+          heading: "Advanced",
+          items: [
+            {
+              name: "Debug logging",
+              desc: "Log debug messages to the developer console. Never logs tokens or note contents.",
+              control: { type: "toggle", key: "debug" },
+            },
+          ],
+        },
+      ],
+      values: {
+        debug: {
+          get: () => plugin.data.debug,
+          set: async (v) => {
+            plugin.data.debug = v === true;
+            await plugin.persist();
+          },
+        },
+      },
+    };
+  }
+}
+
+/** Name with a status badge, description, on/off toggle. A render row for the badge. */
+function moduleRow(info: ModuleInfo, registry: ModuleRegistry): SettingDefinition {
+  const badge = info.required && info.status === "loaded" ? { text: "Always on", tone: "ok" } : BADGES[info.status];
+  return {
+    name: info.name,
+    desc: info.error ? `Error: ${info.error}` : (info.description ?? ""),
+    render: (setting) => {
+      setting.nameEl.createSpan({ cls: `cw-badge is-${badge.tone}`, text: badge.text });
+      setting.addToggle((t) =>
+        t
+          .setValue(registry.isEnabled(info.id))
+          .setDisabled(info.status === "unsupported" || info.required)
+          // The registry announces the change, which redraws the tab.
+          .onChange((v) => registry.setEnabled(info.id, v)),
       );
-  }
+    },
+  };
+}
+
+function contentsRow(c: ModuleContents): SettingDefinition {
+  return {
+    name: "What it adds",
+    searchable: false,
+    render: (setting) => {
+      setting.settingEl.empty();
+      setting.settingEl.addClass("cw-module-contents-row");
+      renderContents(setting.settingEl, c);
+    },
+  };
+}
+
+/** A module's rows, with control keys prefixed so that modules can't collide. */
+function scoped(prefix: string, section: SettingsSection, values: Record<string, ControlValue>): SettingDefinition[] {
+  return section.items.map((def) => {
+    if (!def.control) return def;
+    const key = `${prefix}.${def.control.key}`;
+    const value = section.values[def.control.key];
+    if (value) values[key] = value;
+    return { ...def, control: { ...def.control, key } };
+  });
 }
 
 /** Collapsible "what this module adds", inside the module's card. */

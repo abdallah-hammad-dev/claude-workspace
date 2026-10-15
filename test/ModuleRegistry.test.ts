@@ -48,7 +48,7 @@ function fullModule(id = "demo", extra: Partial<WorkspaceModule> = {}): Workspac
       ctx.registerContextProvider({ id: "p", viewTypes: ["markdown"], collect: () => ({ a: 1 }) });
       ctx.registerCommand({ id: "cmd", name: "Cmd", callback: () => undefined });
       ctx.registerView(`${id}-view`, (leaf) => ({ leaf }) as never);
-      ctx.registerSettings({ title: id, display: () => undefined });
+      ctx.registerSettings({ title: id, items: [], values: {} });
       ctx.registerSkill({ name: `${id}-skill`, markdown: "---\nname: x\n---\n" });
     },
     ...extra,

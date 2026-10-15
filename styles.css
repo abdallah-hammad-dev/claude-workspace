@@ -1403,25 +1403,22 @@ button.cw-mic-btn.is-working {
 
 /* ───────────────────────── settings ───────────────────────── */
 
-.cw-status-card {
-  margin: 0 0 12px;
-  border-radius: var(--setting-items-radius, var(--cw-radius));
-  border: var(--setting-items-border-width, 1px) solid var(--setting-items-border-color, var(--cw-border));
-  background: var(--setting-items-background, var(--background-secondary));
+/* The cards of a section sit close together; a heading starts a new section. */
+.cw-settings .setting-group + .setting-group {
+  margin-top: 12px;
 }
-.cw-status-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-  padding: 10px 14px;
+.cw-settings .setting-group + .setting-group:has(> .setting-item-heading) {
+  margin-top: 28px;
 }
-.cw-status-row + .cw-status-row {
-  border-top: 1px solid var(--cw-border);
+/* Connection status: compact rows, an icon in front, the value after the name. */
+.setting-item.cw-status-row {
+  --setting-items-padding-y: var(--size-4-3);
 }
-.cw-status-icon {
+.setting-item.cw-status-row > .cw-status-icon {
   display: flex;
   flex: none;
-  margin-top: 1px;
+  margin-top: 2px;
+  margin-inline-end: 10px;
 }
 .cw-status-icon svg {
   width: 16px;
@@ -1436,53 +1433,12 @@ button.cw-mic-btn.is-working {
 .cw-status-row.is-error .cw-status-icon {
   color: var(--text-error);
 }
-.cw-status-text {
-  flex: 1;
-  min-width: 0;
-}
-.cw-status-line {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 8px;
-}
-.cw-status-label {
-  font-weight: var(--font-semibold);
-}
 .cw-status-value {
+  margin-left: 8px;
   color: var(--text-muted);
 }
-.cw-status-detail {
-  margin-top: 2px;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
+.cw-status-row .setting-item-description {
   overflow-wrap: anywhere;
-}
-.cw-status-row > button {
-  flex: none;
-  align-self: center;
-}
-
-.cw-settings-section {
-  margin: 28px 0 10px;
-}
-.cw-settings-section:first-child {
-  margin-top: 0;
-}
-.cw-settings-title {
-  font-size: var(--font-ui-medium);
-  font-weight: var(--font-semibold);
-}
-.cw-settings-desc {
-  margin-top: 2px;
-  font-size: var(--font-ui-smaller);
-  color: var(--text-muted);
-}
-.cw-settings .setting-group.cw-module-group + .setting-group.cw-module-group {
-  margin-top: 12px;
-}
-.cw-settings .setting-group + .setting-group:not(.cw-module-group) {
-  margin-top: 28px;
 }
 .setting-item.cw-module-contents-row {
   display: block;

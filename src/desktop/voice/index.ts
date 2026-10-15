@@ -1,11 +1,11 @@
 import { Notice, requestUrl, type App } from "obsidian";
 import type { Logger } from "../../core/module-api";
-import type { VoicePrefs } from "../../core/settings";
+import type { SettingsBlock, VoicePrefs } from "../../core/settings";
 import { encodeWav, hasSpeech, SAMPLE_RATE } from "./audio";
 import { MicRecording } from "./MicRecording";
 import { continuationPrompt, readTranscription, resolveTarget, transcriptionBody, transcriptionFields } from "./providers";
 import type { VoiceService } from "./service";
-import { renderVoiceSettings } from "./voice-settings";
+import { voiceSettings } from "./voice-settings";
 
 export interface VoiceDeps {
   app: App;
@@ -17,16 +17,10 @@ export interface VoiceDeps {
 
 export interface Voice {
   service: VoiceService;
-  renderSettings(el: HTMLElement, refresh: () => void): void;
+  settings(): SettingsBlock;
 }
 
 const REQUEST_TIMEOUT_MS = 60_000;
-
-/** Obsidian's keychain (1.11.4+, documented); undefined on older versions. */
-function keychain(app: App): { getSecret(id: string): string | null } | undefined {
-  const s = (app as Partial<Pick<App, "secretStorage">>).secretStorage;
-  return typeof s?.getSecret === "function" ? s : undefined;
-}
 
 /**
  * Voice input: the chat's mic records 16 kHz audio, which is sent as a WAV to the OpenAI-compatible
@@ -38,12 +32,11 @@ export function createVoice(d: VoiceDeps): Voice {
   let lastMs: number | null = null;
   const apiKey = (): string | null => {
     const name = d.prefs().secret;
-    return name ? (keychain(d.app)?.getSecret(name) ?? null) : null;
+    return name ? d.app.secretStorage.getSecret(name) : null;
   };
 
   /** What's missing before anything can be transcribed, or null. */
   const problem = (): string | null => {
-    if (!keychain(d.app)) return "Voice input needs Obsidian 1.11.4 or later, to keep the API key in Obsidian's keychain.";
     const target = resolveTarget(d.prefs());
     // A missing key isn't checked here: self-hosted servers may not need one; a 401 says so.
     return "error" in target ? target.error : null;
@@ -101,28 +94,22 @@ export function createVoice(d: VoiceDeps): Voice {
 
   return {
     service,
-    renderSettings: (el, refresh) =>
-      renderVoiceSettings(
-        el,
-        {
-          app: d.app,
-          prefs: d.prefs(),
-          setPrefs: async (p) => {
-            await d.savePrefs(p);
-            listeners.forEach((fn) => fn());
-          },
-          hasKeychain: !!keychain(d.app),
-          check: async () => {
-            const p = problem();
-            if (p) throw new Error(p);
-            // One second of silence: only the HTTP answer matters.
-            await send(encodeWav(new Float32Array(SAMPLE_RATE)));
-            const target = resolveTarget(d.prefs());
-            return `${"error" in target ? "The service" : target.host} answered in ${((lastMs ?? 0) / 1000).toFixed(1)} s.`;
-          },
+    settings: () =>
+      voiceSettings({
+        prefs: () => d.prefs(),
+        setPrefs: async (p) => {
+          await d.savePrefs(p);
+          listeners.forEach((fn) => fn());
         },
-        refresh,
-      ),
+        check: async () => {
+          const p = problem();
+          if (p) throw new Error(p);
+          // One second of silence: only the HTTP answer matters.
+          await send(encodeWav(new Float32Array(SAMPLE_RATE)));
+          const target = resolveTarget(d.prefs());
+          return `${"error" in target ? "The service" : target.host} answered in ${((lastMs ?? 0) / 1000).toFixed(1)} s.`;
+        },
+      }),
   };
 }
 

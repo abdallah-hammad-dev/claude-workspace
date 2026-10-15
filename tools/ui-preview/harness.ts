@@ -3,8 +3,8 @@
  * for screenshots (see shoot.mjs). Not shipped in the plugin.
  */
 import { ChatView, type ChatHost } from "../../src/desktop/chat/ChatView";
-import { renderConnectionSettings } from "../../src/desktop/connection-settings";
-import { renderVoiceSettings } from "../../src/desktop/voice/voice-settings";
+import { connectionSettings } from "../../src/desktop/connection-settings";
+import { voiceSettings } from "../../src/desktop/voice/voice-settings";
 import type { VoiceService } from "../../src/desktop/voice/service";
 import { ModuleRegistry } from "../../src/core/ModuleRegistry";
 import { WorkspaceSettingTab, mergeData } from "../../src/core/settings";
@@ -77,7 +77,7 @@ for (const m of builtinModules) registry.add(m);
 
 async function main(): Promise<void> {
   await registry.start();
-  if (scenario === "settings") await renderSettings();
+  if (scenario.startsWith("settings")) await renderSettings();
   else await renderChat();
   (window as any).__ready = true;
 }
@@ -85,53 +85,50 @@ async function main(): Promise<void> {
 // ───────────────────────── settings ─────────────────────────
 
 async function renderSettings(): Promise<void> {
+  // settings: everything set up. settings-first-run: Claude Code not found, server down, vault not connected, voice off.
+  const firstRun = scenario === "settings-first-run";
   const frame = document.body.createDiv({ cls: "modal mod-settings cw-preview-settings" });
   const content = frame.createDiv({ cls: "vertical-tab-content-container" });
+  const voice = { ...data.voice, enabled: !firstRun, secret: firstRun ? "" : "groq" };
   const fakePlugin: any = {
     ...plugin,
     registry,
     data,
     persist: async () => undefined,
+    register() {},
     coreSettingsSections: [
-      (el: HTMLElement, refresh: () => void) =>
-        renderConnectionSettings(
-          el,
+      (refresh: () => void) =>
+        connectionSettings(
           {
-            claudePathOverride: "",
-            setClaudePathOverride: async () => undefined,
-            detectedClaude: "C:\\Users\\abdal\\.local\\bin\\claude.exe",
-            serverState: { status: "listening", port: 27557 },
-            port: null,
+            claudePath: () => "",
+            setClaudePath: async () => undefined,
+            detectClaude: () => (firstRun ? null : "C:\\Users\\abdal\\.local\\bin\\claude.exe"),
+            serverState: () => (firstRun ? { status: "error", message: "Port 27557 is already in use" } : { status: "listening", port: 27557 }),
+            port: () => null,
             defaultPort: 27557,
             setPort: async () => undefined,
             restartServer: async () => undefined,
-            installStatus: async () => params.get("installed") !== "0",
+            installStatus: async () => !firstRun && params.get("installed") !== "0",
             install: async () => undefined,
             copyMcpAddCommand: async () => undefined,
             regenerateToken: async () => undefined,
           },
           refresh,
         ),
-      (el: HTMLElement, refresh: () => void) =>
-        renderVoiceSettings(
-          el,
-          {
-            app,
-            prefs: { ...data.voice, enabled: true, secret: "groq" },
-            setPrefs: async () => undefined,
-            hasKeychain: true,
-            check: async () => "api.groq.com answered in 0.4 s.",
-          },
-          refresh,
-        ),
+      () =>
+        voiceSettings({
+          prefs: () => voice,
+          setPrefs: async (p) => void Object.assign(voice, p),
+          check: async () => "api.groq.com answered in 0.4 s.",
+        }),
     ],
   };
   const tab = new WorkspaceSettingTab(app, fakePlugin);
   content.appendChild(tab.containerEl);
-  tab.display();
+  tab.update(); // what addSettingTab does; it draws too, since the tab is in the page
   await tick();
   // Show the contents of the Excalidraw module card.
-  tab.containerEl.querySelectorAll<HTMLDetailsElement>(".cw-module-contents")[3]?.setAttribute("open", "");
+  if (!firstRun) tab.containerEl.querySelectorAll<HTMLDetailsElement>(".cw-module-contents")[3]?.setAttribute("open", "");
 }
 
 // ───────────────────────── chat ─────────────────────────

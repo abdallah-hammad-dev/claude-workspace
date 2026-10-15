@@ -1,4 +1,3 @@
-import { Setting } from "obsidian";
 import { z } from "zod";
 import { ToolError, type WorkspaceModule } from "../../core/module-api";
 import { DEFAULT_BLOCKLIST, isBlocked, obsidianCommands, searchCommands } from "./registry";
@@ -97,17 +96,21 @@ export const commandsModule: WorkspaceModule = {
 
     ctx.registerSettings({
       title: "Obsidian commands",
-      display: (el) => {
-        new Setting(el)
-          .setName("Blocked commands")
-          .setDesc("Claude can't list or run these. One id per line; a trailing * matches a prefix (e.g. app:*).")
-          .addTextArea((t) => {
-            t.inputEl.rows = 6;
-            t.setValue(settings.blocklist).onChange(async (v) => {
-              settings.blocklist = v;
-              await ctx.saveData(settings);
-            });
-          });
+      items: [
+        {
+          name: "Blocked commands",
+          desc: "Claude can't list or run these. One id per line; a trailing * matches a prefix (e.g. app:*).",
+          control: { type: "textarea", key: "blocklist", rows: 6 },
+        },
+      ],
+      values: {
+        blocklist: {
+          get: () => settings.blocklist,
+          set: async (v) => {
+            settings.blocklist = String(v);
+            await ctx.saveData(settings);
+          },
+        },
       },
     });
 

@@ -2,7 +2,7 @@
   "id": "claude-workspace",
   "name": "Claude Workspace",
   "version": "0.2.0",
-  "minAppVersion": "1.7.2",
+  "minAppVersion": "1.13.2",
   "description": "Use Claude Code as the brain of your vault: live context of what you are looking at, a local MCP server, and modules (Excalidraw, …).",
   "author": "Abdallah Hammad",
   "isDesktopOnly": false

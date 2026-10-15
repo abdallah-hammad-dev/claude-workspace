@@ -40,7 +40,7 @@ inside your vault.
 
 ## Requirements
 
-- Obsidian **1.7.2+** on desktop.
+- Obsidian **1.13.2+** on desktop.
   - Tested on Windows and on Linux (1.14.4, tarball build).
   - macOS should work but is untested.
   - Flatpak and Snap builds of Obsidian are sandboxed and may not find `claude`.
@@ -124,8 +124,8 @@ Enter also stops the recording (without sending), and Esc stops it and drops wha
   | Groq (prefilled; free tier with daily limits) | `https://api.groq.com/openai/v1` | `whisper-large-v3-turbo` | [console.groq.com/keys](https://console.groq.com/keys) |
   | OpenAI (paid) | `https://api.openai.com/v1` | `whisper-1` | [platform.openai.com/api-keys](https://platform.openai.com/api-keys) |
   | Your own server (e.g. a self-hosted Whisper) | its URL | its model name | if it needs one |
-- **The API key stays out of your vault.** It's kept in Obsidian's keychain (**Settings → Keychain**, Obsidian
-  1.11.4 or later). The plugin's settings only store the key's name.
+- **The API key stays out of your vault.** It's kept in Obsidian's keychain (**Settings → Keychain**). The
+  plugin's settings only store the key's name.
 - **Nothing is recorded or sent** unless you click the mic. Silent recordings aren't sent.
 - **Phrase by phrase:** a phrase is sent after at least 3 s of speech and a 1 s pause, so one request every
   4 s at most (Groq's free tier allows 20 a minute). Each phrase goes with the text before it, so sentences

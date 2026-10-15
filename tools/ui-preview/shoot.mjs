@@ -41,6 +41,7 @@ const SCENARIOS = [
   ["chat-context-preview", 420, 860],
   ["chat-voice", 420, 860],
   ["settings", 760, 2300],
+  ["settings-first-run", 760, 1600],
 ];
 const wanted = process.argv.slice(2);
 const run = SCENARIOS.filter(([name]) => !wanted.length || wanted.includes(name));
@@ -122,8 +123,13 @@ for (const [name, width, height] of run) {
     await page.waitForFunction(() => window.__ready === true, null, { timeout: 10000 }).catch(() => errors.push("timed out"));
     await page.waitForTimeout(150);
     const file = join(out, `${name}-${theme}.png`);
-    if (name === "settings") await page.locator(".cw-preview-settings").screenshot({ path: file });
-    else await page.screenshot({ path: file });
+    if (name.startsWith("settings")) {
+      // Only what's in the viewport gets painted: grow it to the whole settings page first.
+      const settings = page.locator(".cw-preview-settings");
+      const box = await settings.boundingBox();
+      if (box) await page.setViewportSize({ width, height: Math.max(height, Math.ceil(box.y + box.height)) });
+      await settings.screenshot({ path: file });
+    } else await page.screenshot({ path: file });
     console.log(`${errors.length ? "✗" : "✓"} ${name}-${theme}${errors.length ? `  ${errors.join(" | ")}` : ""}`);
     await page.close();
   }

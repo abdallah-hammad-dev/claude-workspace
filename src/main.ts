@@ -49,7 +49,6 @@ export default class ClaudeWorkspacePlugin extends Plugin {
     };
 
     for (const mod of builtinModules) this.registry.add(mod);
-    this.addSettingTab(new WorkspaceSettingTab(this.app, this));
 
     // Node-only code lives behind a dynamic import so the bundle still loads on mobile.
     if (Platform.isDesktopApp) {
@@ -61,6 +60,8 @@ export default class ClaudeWorkspacePlugin extends Plugin {
         new Notice(`Claude Workspace: failed to start (${e instanceof Error ? e.message : String(e)}). See the developer console.`, 15000);
       }
     }
+    // After the desktop sections are in: Obsidian reads the definitions when the tab is added.
+    this.addSettingTab(new WorkspaceSettingTab(this.app, this));
 
     // Modules may depend on other plugins (Excalidraw), which load in any order.
     this.app.workspace.onLayoutReady(() => {

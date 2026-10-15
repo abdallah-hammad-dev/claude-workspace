@@ -7,7 +7,7 @@
  *
  * Keep this file free of MCP SDK / Agent SDK types so modules don't depend on them.
  */
-import type { App, Command, Plugin, TFile, View, ViewCreator } from "obsidian";
+import type { App, Command, Plugin, SettingDefinition, TFile, View, ViewCreator } from "obsidian";
 import type { z } from "zod";
 
 export type Disposer = () => void;
@@ -141,7 +141,18 @@ export interface ActiveContext {
 export interface SettingsSection {
   /** Heading shown above the module's settings. */
   title: string;
-  display(containerEl: HTMLElement): void;
+  /**
+   * Rows added to the module's card, as Obsidian setting definitions (rendered and searched by Obsidian).
+   * Prefer `control` rows; their keys are the module's own and are looked up in `values`.
+   */
+  items: SettingDefinition[];
+  values: Record<string, ControlValue>;
+}
+
+/** Where a setting control's value lives: `get` fills the control, `set` receives what the user entered. */
+export interface ControlValue {
+  get(): unknown;
+  set(value: unknown): void | Promise<void>;
 }
 
 export interface SkillDef {

@@ -5,6 +5,7 @@
  */
 import { createElement, icons } from "lucide";
 import { marked } from "marked";
+import type { SettingControl, SettingDefinitionGroup, SettingDefinitionItem, SettingGroup, SettingGroupItem } from "obsidian";
 
 type DomInfo = {
   cls?: string | string[];
@@ -301,6 +302,9 @@ abstract class ValueComponent<T> {
     this.cb = cb;
     return this;
   }
+  setDisabled(_d: boolean): this {
+    return this;
+  }
 }
 
 class ToggleComponent extends ValueComponent<boolean> {
@@ -320,7 +324,7 @@ class ToggleComponent extends ValueComponent<boolean> {
     this.toggleEl.classList.toggle("is-enabled", v);
     return this;
   }
-  setDisabled(d: boolean): this {
+  override setDisabled(d: boolean): this {
     this.toggleEl.classList.toggle("is-disabled", d);
     return this;
   }
@@ -343,6 +347,10 @@ class TextComponent extends ValueComponent<string> {
     this.inputEl.value = v;
     return this;
   }
+  override setDisabled(d: boolean): this {
+    this.inputEl.disabled = d;
+    return this;
+  }
 }
 
 class DropdownComponent extends ValueComponent<string> {
@@ -362,20 +370,34 @@ class DropdownComponent extends ValueComponent<string> {
     this.selectEl.value = v;
     return this;
   }
-}
-
-/** Obsidian 1.11's keychain picker: a button showing the chosen secret's name. */
-export class SecretComponent {
-  private button: HTMLButtonElement;
-  constructor(_app: unknown, parent: HTMLElement) {
-    this.button = document.createElement("button");
-    parent.appendChild(this.button);
-  }
-  setValue(v: string): this {
-    this.button.textContent = v || "Select a secret…";
+  override setDisabled(d: boolean): this {
+    this.selectEl.disabled = d;
     return this;
   }
-  onChange(_cb: (v: string | null) => unknown): this {
+}
+
+/** Obsidian 1.14's keychain picker: masked value with a clear button once linked, then "Change" (or "Link..."). */
+export class SecretComponent extends ValueComponent<string | null> {
+  private valueEl: HTMLElement;
+  private buttonEl: HTMLButtonElement;
+  constructor(_app: unknown, parent: HTMLElement) {
+    super();
+    this.valueEl = (parent as unknown as { createDiv(o: string): HTMLElement }).createDiv("setting-secret-value");
+    this.buttonEl = document.createElement("button");
+    parent.appendChild(this.buttonEl);
+  }
+  setValue(v: string | null): this {
+    (this.valueEl as unknown as { empty(): void }).empty();
+    this.buttonEl.textContent = v ? "Change" : "Link...";
+    if (v) {
+      const chip = (this.valueEl as unknown as { createSpan(o: string): HTMLElement }).createSpan("setting-hotkey");
+      (chip as unknown as { createSpan(o: object): HTMLElement }).createSpan({ cls: "setting-password", text: "\u2022".repeat(7) });
+      setIcon((chip as unknown as { createSpan(o: string): HTMLElement }).createSpan("setting-hotkey-icon"), "x");
+    }
+    return this;
+  }
+  override setDisabled(d: boolean): this {
+    this.buttonEl.disabled = d;
     return this;
   }
 }
@@ -394,8 +416,13 @@ class ButtonComponent {
     this.buttonEl.classList.add("mod-cta");
     return this;
   }
+  /** Since 1.14: destructive + call to action. */
   setWarning(): this {
-    this.buttonEl.classList.add("mod-warning");
+    this.buttonEl.classList.add("mod-destructive", "mod-cta");
+    return this;
+  }
+  setDisabled(d: boolean): this {
+    this.buttonEl.disabled = d;
     return this;
   }
   onClick(cb: () => unknown): this {
@@ -404,15 +431,19 @@ class ButtonComponent {
   }
 }
 
+type Disableable = { setDisabled(d: boolean): unknown };
+
 export class Setting {
   settingEl: HTMLElement;
   infoEl: HTMLElement;
   nameEl: HTMLElement;
   descEl: HTMLElement;
   controlEl: HTMLElement;
+  private components: Disableable[] = [];
   constructor(container: HTMLElement) {
     const c = (p: HTMLElement, cls: string) => (p as unknown as { createDiv(o: string): HTMLElement }).createDiv(cls);
     this.settingEl = c(container, "setting-item");
+    this.settingEl.tabIndex = -1;
     this.infoEl = c(this.settingEl, "setting-item-info");
     this.nameEl = c(this.infoEl, "setting-item-name");
     this.descEl = c(this.infoEl, "setting-item-description");
@@ -430,39 +461,185 @@ export class Setting {
     this.settingEl.classList.add("setting-item-heading");
     return this;
   }
-  addToggle(cb: (t: ToggleComponent) => unknown): this {
-    cb(new ToggleComponent(this.controlEl));
+  setDisabled(d: boolean): this {
+    this.settingEl.classList.toggle("is-disabled", d);
+    for (const c of this.components) c.setDisabled(d);
     return this;
+  }
+  private add<T extends Disableable>(c: T, cb: (c: T) => unknown): this {
+    this.components.push(c);
+    cb(c);
+    return this;
+  }
+  addToggle(cb: (t: ToggleComponent) => unknown): this {
+    this.settingEl.classList.add("mod-toggle");
+    return this.add(new ToggleComponent(this.controlEl), cb);
   }
   addText(cb: (t: TextComponent) => unknown): this {
-    cb(new TextComponent(this.controlEl, "input"));
-    return this;
+    return this.add(new TextComponent(this.controlEl, "input"), cb);
   }
   addTextArea(cb: (t: TextComponent) => unknown): this {
-    cb(new TextComponent(this.controlEl, "textarea"));
-    return this;
+    return this.add(new TextComponent(this.controlEl, "textarea"), cb);
   }
   addDropdown(cb: (d: DropdownComponent) => unknown): this {
-    cb(new DropdownComponent(this.controlEl));
-    return this;
+    return this.add(new DropdownComponent(this.controlEl), cb);
   }
   addButton(cb: (b: ButtonComponent) => unknown): this {
-    cb(new ButtonComponent(this.controlEl));
-    return this;
+    return this.add(new ButtonComponent(this.controlEl), cb);
   }
   addComponent(cb: (el: HTMLElement) => unknown): this {
-    cb(this.controlEl);
+    const c = cb(this.controlEl) as Partial<Disableable> | undefined;
+    if (typeof c?.setDisabled === "function") this.components.push(c as Disableable);
     return this;
   }
 }
 
+// ───────────────────────── declarative settings (1.13+) ─────────────────────────
+
+interface RenderedRow {
+  def: SettingGroupItem;
+  setting: Setting;
+  cleanup?: () => void;
+}
+interface RenderedGroup {
+  def: SettingDefinitionGroup;
+  el: HTMLElement;
+  rows: RenderedRow[];
+}
+
+const isGroup = (d: SettingDefinitionItem): d is SettingDefinitionGroup => "type" in d && (d.type === "group" || d.type === "list");
+const evaluate = (v: boolean | (() => boolean) | undefined, fallback: boolean) => (v === undefined ? fallback : typeof v === "function" ? v() : v);
+
+/**
+ * Obsidian's SettingTab, rendering `getSettingDefinitions()` roughly like app.js does: rows outside a
+ * group go into a group without heading, groups use SettingGroup's markup, `visible`/`disabled` are
+ * applied by refreshDomState(). Redraws everything instead of reconciling rows. Pages, lists' add/delete/
+ * reorder, search and number/file/folder/slider/color controls are left out until a scenario needs them.
+ */
 export class PluginSettingTab {
   containerEl = document.createElement("div");
+  settingItems: SettingDefinitionItem[] = [];
+  private rendered: RenderedGroup[] = [];
   constructor(
     public app: unknown,
     public plugin: unknown,
   ) {
     this.containerEl.className = "vertical-tab-content";
+  }
+  getSettingDefinitions(): SettingDefinitionItem[] {
+    return [];
+  }
+  getControlValue(_key: string): unknown {
+    return undefined;
+  }
+  setControlValue(_key: string, _value: unknown): void | Promise<void> {}
+  update(): void {
+    this.settingItems = this.getSettingDefinitions();
+    if (this.containerEl.isConnected) this.display();
+  }
+  /** What Obsidian does when the tab is opened: draw the definitions kept by the last update(). */
+  display(): void {
+    for (const g of this.rendered) for (const r of g.rows) r.cleanup?.();
+    (this.containerEl as unknown as { empty(): void }).empty();
+    const groups: SettingDefinitionGroup[] = [];
+    let loose: SettingGroupItem[] | null = null;
+    for (const item of this.settingItems) {
+      if (isGroup(item)) {
+        groups.push(item);
+        loose = null;
+      } else {
+        if (!loose) groups.push({ type: "group", items: (loose = []) });
+        loose.push(item as SettingGroupItem);
+      }
+    }
+    this.rendered = groups.map((g) => this.renderGroup(g));
+    this.refreshDomState();
+  }
+  refreshDomState(): void {
+    for (const g of this.rendered) {
+      let anyRowShown = false;
+      for (const { def, setting } of g.rows) {
+        const shown = evaluate(def.visible, true);
+        (setting.settingEl as unknown as { toggle(v: boolean): void }).toggle(shown);
+        anyRowShown ||= shown;
+        if ("type" in def) continue;
+        const disabled = "disabled" in def ? def.disabled : def.control?.disabled;
+        if (disabled !== undefined) setting.setDisabled(evaluate(disabled, false));
+      }
+      (g.el as unknown as { toggle(v: boolean): void }).toggle(evaluate(g.def.visible, true) && (!g.rows.length || anyRowShown));
+    }
+  }
+  hide(): void {}
+
+  private renderGroup(def: SettingDefinitionGroup): RenderedGroup {
+    const div = (p: HTMLElement, cls: string) => (p as unknown as { createDiv(o: string): HTMLElement }).createDiv(cls);
+    const el = div(this.containerEl, "setting-group");
+    if (def.type === "list") el.classList.add("mod-list");
+    if (def.cls) el.classList.add(...def.cls.split(" ").filter(Boolean));
+    if (def.heading) {
+      const head = div(el, "setting-item setting-item-heading");
+      div(head, "setting-item-name").textContent = def.heading;
+      div(head, "setting-item-control");
+    }
+    div(el, "setting-group-search");
+    const listEl = div(el, "setting-items");
+    const group = { listEl } as unknown as SettingGroup;
+    const rows = (def.items ?? []).map((item) => this.renderRow(item, listEl, group));
+    return { def, el, rows };
+  }
+
+  private renderRow(def: SettingGroupItem, listEl: HTMLElement, group: SettingGroup): RenderedRow {
+    const setting = new Setting(listEl);
+    const row: RenderedRow = { def, setting };
+    setting.setName(def.name);
+    setting.setDesc(def.desc ? (typeof def.desc === "string" ? def.desc : (def.desc.cloneNode(true) as DocumentFragment)) : "");
+    if ("type" in def) {
+      setting.settingEl.classList.add("mod-navigable", "tappable");
+      setIcon((setting.controlEl as unknown as { createDiv(o: string): HTMLElement }).createDiv("setting-item-chevron"), "chevron-right");
+    } else if (def.action) {
+      const action = def.action;
+      setting.settingEl.classList.add("mod-action", "tappable");
+      setting.settingEl.addEventListener("click", () => action(setting.settingEl, 0));
+    } else if (def.render) {
+      // Obsidian's Setting/SettingGroup types are richer than these stand-ins; the callbacks only use what is here.
+      const cleanup = def.render(setting as never, group);
+      if (cleanup) row.cleanup = cleanup;
+    } else if (def.control) {
+      this.renderControl(setting, def.control);
+    }
+    return row;
+  }
+
+  private renderControl(setting: Setting, control: SettingControl): void {
+    const value = this.getControlValue(control.key) ?? control.defaultValue;
+    const onChange = async (v: unknown) => {
+      await this.setControlValue(control.key, v);
+      this.refreshDomState();
+    };
+    switch (control.type) {
+      case "toggle":
+        setting.addToggle((t) => t.setValue(value === true).onChange(onChange));
+        break;
+      case "dropdown":
+        setting.addDropdown((d) => {
+          for (const [k, label] of Object.entries(control.options)) d.addOption(k, label);
+          d.setValue(String(value ?? "")).onChange(onChange);
+        });
+        break;
+      case "text":
+      case "textarea":
+        setting[control.type === "text" ? "addText" : "addTextArea"]((t) => {
+          if (control.placeholder) t.setPlaceholder(control.placeholder);
+          if (control.type === "textarea" && control.rows !== undefined) (t.inputEl as HTMLTextAreaElement).rows = control.rows;
+          t.setValue(typeof value === "string" ? value : "").onChange(onChange);
+        });
+        break;
+      case "secret":
+        setting.addComponent((el) => new SecretComponent(this.app, el).setValue(typeof value === "string" ? value : "").onChange(onChange));
+        break;
+      default:
+        throw new Error(`ui-preview: "${control.type}" controls aren't drawn yet (tools/ui-preview/obsidian-browser.ts)`);
+    }
   }
 }
 

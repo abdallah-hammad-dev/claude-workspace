@@ -31,6 +31,7 @@ export class TFolder extends TAbstractFile {}
 export class Component {
   load(): void {}
   unload(): void {}
+  register(_cb: () => unknown): void {}
 }
 
 export class View extends Component {
@@ -107,10 +108,23 @@ export class Plugin extends Component {
 
 export class PluginSettingTab {
   containerEl: any = makeEl();
+  /** What Obsidian renders: the definitions read by the last update(). */
+  settingItems: any[] = [];
   constructor(
     public app: App,
     public plugin: Plugin,
   ) {}
+  getSettingDefinitions(): any[] {
+    return [];
+  }
+  update(): void {
+    this.settingItems = this.getSettingDefinitions();
+  }
+  getControlValue(_key: string): unknown {
+    return undefined;
+  }
+  setControlValue(_key: string, _value: unknown): void | Promise<void> {}
+  refreshDomState(): void {}
   display(): void {}
 }
 
@@ -150,6 +164,10 @@ function makeEl(): any {
     setText(t: string) {
       el.text = t;
     },
+    addClass() {},
+    appendText(t: string) {
+      el.text += t;
+    },
     createDiv() {
       const c = makeEl();
       el.children.push(c);
@@ -161,6 +179,13 @@ function makeEl(): any {
   };
   return el;
 }
+
+// Obsidian's global; setting descriptions are built with it.
+(globalThis as any).createFragment = (cb?: (f: any) => void) => {
+  const f = makeEl();
+  cb?.(f);
+  return f;
+};
 
 export function normalizePath(p: string): string {
   return p.replace(/\\/g, "/").replace(/\/+/g, "/").replace(/^\/|\/$/g, "");

@@ -1,14 +1,10 @@
-import { SecretComponent, Setting, type App } from "obsidian";
-import { settingGroup } from "../../core/setting-group";
-import type { VoicePrefs } from "../../core/settings";
+import type { ControlValue } from "../../core/module-api";
+import type { SettingsBlock, VoicePrefs } from "../../core/settings";
 import { DEFAULT_ENDPOINT, DEFAULT_MODEL, EXAMPLES } from "./providers";
 
 export interface VoiceSettingsDeps {
-  app: App;
-  prefs: VoicePrefs;
+  prefs(): VoicePrefs;
   setPrefs(p: Partial<VoicePrefs>): Promise<void>;
-  /** Obsidian 1.11.4+ keychain is there. */
-  hasKeychain: boolean;
   /** Sends a second of silence; resolves with a short success line or throws what went wrong. */
   check(): Promise<string>;
 }
@@ -33,31 +29,17 @@ const LANGUAGES: [string, string][] = [
 ];
 
 /** "Voice input" section of the settings tab. No Node imports (the UI preview renders it). */
-export function renderVoiceSettings(el: HTMLElement, d: VoiceSettingsDeps, refresh: () => void): void {
-  const intro = el.createDiv({ cls: "cw-settings-section" });
-  intro.createDiv({ cls: "cw-settings-title", text: "Voice input" });
-  intro.createDiv({
-    cls: "cw-settings-desc",
-    text: "A mic in the chat: talk, and your words are typed in the message box for you to review. The recording is sent to the speech-to-text service below (any OpenAI-compatible API).",
+export function voiceSettings(d: VoiceSettingsDeps): SettingsBlock {
+  const on = () => d.prefs().enabled;
+  const pref = <K extends keyof VoicePrefs>(key: K, parse: (v: unknown) => VoicePrefs[K]): ControlValue => ({
+    get: () => d.prefs()[key],
+    set: (v) => d.setPrefs({ [key]: parse(v) }),
   });
-  const list = settingGroup(el);
-  const p = d.prefs;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const flag = (v: unknown) => v === true;
 
-  new Setting(list)
-    .setName("Show the mic in the chat")
-    .setDesc(d.hasKeychain ? "Off: no mic, nothing is recorded or sent." : "Needs Obsidian 1.11.4 or later, which keeps the API key in its keychain.")
-    .addToggle((t) =>
-      t
-        .setValue(p.enabled && d.hasKeychain)
-        .setDisabled(!d.hasKeychain)
-        .onChange(async (v) => {
-          await d.setPrefs({ enabled: v });
-          refresh();
-        }),
-    );
-  if (!p.enabled || !d.hasKeychain) return;
-
-  const examples = createFragment((f) => {
+  const providerName = (name: string) => name.replace(/ \(.*\)$/, "");
+  const endpointDesc = createFragment((f) => {
     f.appendText("Base URL of an OpenAI-compatible API; the plugin calls …/audio/transcriptions. Your recordings are sent there. Examples: ");
     EXAMPLES.forEach((x, i) => {
       if (i) f.appendText(", ");
@@ -66,72 +48,80 @@ export function renderVoiceSettings(el: HTMLElement, d: VoiceSettingsDeps, refre
     });
     f.appendText(", or your own server.");
   });
-  new Setting(list)
-    .setName("Endpoint URL")
-    .setDesc(examples)
-    .addText((t) =>
-      t
-        .setPlaceholder(DEFAULT_ENDPOINT)
-        .setValue(p.url)
-        .onChange(async (v) => d.setPrefs({ url: v.trim() })),
-    );
-
-  new Setting(list)
-    .setName("Model")
-    .setDesc(createFragment((f) => {
-      f.appendText("As the service names it. ");
-      EXAMPLES.forEach((x, i) => {
-        if (i) f.appendText(", ");
-        f.appendText(`${x.name.replace(/ \(.*\)$/, "")}: `);
-        f.createEl("code", { text: x.model });
-      });
-      f.appendText(".");
-    }))
-    .addText((t) =>
-      t
-        .setPlaceholder(DEFAULT_MODEL)
-        .setValue(p.model)
-        .onChange(async (v) => d.setPrefs({ model: v.trim() })),
-    );
-
-  const key = new Setting(list).setName("API key");
-  key.descEl.appendText("Kept in Obsidian's keychain (Settings → Keychain), not in your vault. Leave empty if your server needs none. Get one: ");
-  EXAMPLES.forEach((x, i) => {
-    if (i) key.descEl.appendText(", ");
-    key.descEl.createEl("a", { text: x.name.replace(/ \(.*\)$/, ""), href: x.keys });
-  });
-  key.descEl.appendText(".");
-  key.addComponent((c) =>
-    new SecretComponent(d.app, c).setValue(p.secret).onChange(async (v) => {
-      await d.setPrefs({ secret: v ?? "" });
-    }),
-  );
-
-  new Setting(list)
-    .setName("Spoken language")
-    .setDesc("Automatic detection handles switching languages. Pick yours if short sentences come out in the wrong one.")
-    .addDropdown((dd) => {
-      for (const [code, label] of LANGUAGES) dd.addOption(code, label);
-      dd.setValue(p.language).onChange(async (v) => d.setPrefs({ language: v }));
+  const modelDesc = createFragment((f) => {
+    f.appendText("As the service names it. ");
+    EXAMPLES.forEach((x, i) => {
+      if (i) f.appendText(", ");
+      f.appendText(`${providerName(x.name)}: `);
+      f.createEl("code", { text: x.model });
     });
+    f.appendText(".");
+  });
+  const keyDesc = createFragment((f) => {
+    f.appendText("Kept in Obsidian's keychain (Settings → Keychain), not in your vault. Leave empty if your server needs none. Get one: ");
+    EXAMPLES.forEach((x, i) => {
+      if (i) f.appendText(", ");
+      f.createEl("a", { text: providerName(x.name), href: x.keys });
+    });
+    f.appendText(".");
+  });
 
-  new Setting(list)
-    .setName("Type at each pause")
-    .setDesc("When you pause for a second, what you just said is sent and appears in the message box while you keep talking. Off: everything is sent in one go when you stop (fewer requests).")
-    .addToggle((t) => t.setValue(p.live).onChange(async (v) => d.setPrefs({ live: v })));
-
-  const check = new Setting(list).setName("Check the connection").setDesc("Sends one second of silence to the service.");
-  check.addButton((b) =>
-    b.setButtonText("Check").onClick(async () => {
-      b.setDisabled(true);
-      check.setDesc("Checking…");
-      try {
-        check.setDesc(`Works. ${await d.check()}`);
-      } catch (e) {
-        check.setDesc(`Failed: ${e instanceof Error ? e.message : String(e)}`);
-      } finally {
-        b.setDisabled(false);
-      }
-    }),
-  );
+  return {
+    items: [
+      {
+        type: "group",
+        heading: "Voice input",
+        items: [
+          {
+            name: "Show the mic in the chat",
+            desc: "Talk, and your words are typed in the message box for you to review. Recordings go to a speech-to-text service you choose (any OpenAI-compatible API). Off: no mic, nothing is recorded or sent.",
+            control: { type: "toggle", key: "voice.enabled" },
+          },
+          { name: "Endpoint URL", desc: endpointDesc, visible: on, control: { type: "text", key: "voice.url", placeholder: DEFAULT_ENDPOINT } },
+          { name: "Model", desc: modelDesc, visible: on, control: { type: "text", key: "voice.model", placeholder: DEFAULT_MODEL } },
+          { name: "API key", desc: keyDesc, visible: on, control: { type: "secret", key: "voice.secret" } },
+          {
+            name: "Spoken language",
+            desc: "Automatic detection handles switching languages. Pick yours if short sentences come out in the wrong one.",
+            visible: on,
+            control: { type: "dropdown", key: "voice.language", options: Object.fromEntries(LANGUAGES) },
+          },
+          {
+            name: "Type at each pause",
+            desc: "When you pause for a second, what you just said is sent and appears in the message box while you keep talking. Off: everything is sent in one go when you stop (fewer requests).",
+            visible: on,
+            control: { type: "toggle", key: "voice.live" },
+          },
+          {
+            name: "Check the connection",
+            desc: "Sends one second of silence to the service.",
+            visible: on,
+            render: (s) => {
+              s.addButton((b) =>
+                b.setButtonText("Check").onClick(async () => {
+                  b.setDisabled(true);
+                  s.setDesc("Checking…");
+                  try {
+                    s.setDesc(`Works. ${await d.check()}`);
+                  } catch (e) {
+                    s.setDesc(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+                  } finally {
+                    b.setDisabled(false);
+                  }
+                }),
+              );
+            },
+          },
+        ],
+      },
+    ],
+    values: {
+      "voice.enabled": pref("enabled", flag),
+      "voice.url": pref("url", (v) => str(v).trim()),
+      "voice.model": pref("model", (v) => str(v).trim()),
+      "voice.secret": pref("secret", str),
+      "voice.language": pref("language", str),
+      "voice.live": pref("live", flag),
+    },
+  };
 }

@@ -12,7 +12,7 @@ import { patchSetMaxListenersForElectron } from "./electron-compat";
 import { defaultPortFor, generateToken } from "./http-guard";
 import { Installer } from "./Installer";
 import { mcpAddCommand, type InstallTarget } from "./installer-merge";
-import { renderConnectionSettings } from "./connection-settings";
+import { connectionSettings } from "./connection-settings";
 import { McpHost, SERVER_NAME, type ServedContext } from "./McpHost";
 import { createVoice } from "./voice";
 
@@ -205,42 +205,41 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
     callback: () => void navigator.clipboard.writeText(mcpAddCommand(target())).then(() => new Notice("Copied")),
   });
 
-  plugin.coreSettingsSections.push((el, refresh) =>
-    renderConnectionSettings(
-      el,
-      {
-        claudePathOverride: plugin.data.claudePath,
-        setClaudePathOverride: async (v) => {
-          plugin.data.claudePath = v;
-          await plugin.persist();
+  plugin.coreSettingsSections.push(
+    (refresh) =>
+      connectionSettings(
+        {
+          claudePath: () => plugin.data.claudePath,
+          setClaudePath: async (v) => {
+            plugin.data.claudePath = v;
+            await plugin.persist();
+          },
+          detectClaude: () => locateClaude({ platform: process.platform, home: homedir(), env: process.env, isFile }),
+          serverState: () => host.state,
+          port: () => plugin.data.server.port,
+          defaultPort: defaultPortFor(vaultPath),
+          setPort: async (n) => {
+            plugin.data.server.port = n;
+            await plugin.persist();
+          },
+          restartServer,
+          installStatus: () => installer.status(target()),
+          install,
+          copyMcpAddCommand: async () => {
+            await navigator.clipboard.writeText(mcpAddCommand(target()));
+            new Notice("Copied");
+          },
+          regenerateToken: async () => {
+            plugin.data.server.token = generateToken();
+            await plugin.persist();
+            await restartServer();
+            new Notice("New token saved. Install again so Claude Code uses it.");
+          },
         },
-        detectedClaude: locateClaude({ platform: process.platform, home: homedir(), env: process.env, isFile }),
-        serverState: host.state,
-        port: plugin.data.server.port,
-        defaultPort: defaultPortFor(vaultPath),
-        setPort: async (n) => {
-          plugin.data.server.port = n;
-          await plugin.persist();
-        },
-        restartServer,
-        installStatus: () => installer.status(target()),
-        install,
-        copyMcpAddCommand: async () => {
-          await navigator.clipboard.writeText(mcpAddCommand(target()));
-          new Notice("Copied");
-        },
-        regenerateToken: async () => {
-          plugin.data.server.token = generateToken();
-          await plugin.persist();
-          await restartServer();
-          new Notice("New token saved. Install again so Claude Code uses it.");
-        },
-      },
-      refresh,
-    ),
+        refresh,
+      ),
+    () => voice.settings(),
   );
-
-  plugin.coreSettingsSections.push((el, refresh) => voice.renderSettings(el, refresh));
 
   writeLog("info", `claude executable: ${resolveClaude() ?? "NOT FOUND"}`);
 

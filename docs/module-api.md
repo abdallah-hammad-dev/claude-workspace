@@ -23,7 +23,7 @@ add(mod) ──► pending ──start()──► platform ok? ──► enabled
 | `registerContextProvider(p)` | Adds data/lines to the context block for matching view types | removed |
 | `registerView(type, factory)` | Obsidian view type | leaves detached; placeholder until reload |
 | `registerCommand(cmd)` | Command `claude-workspace:<module>-<id>` | `plugin.removeCommand` |
-| `registerSettings(section)` | Section in the plugin's settings tab | removed |
+| `registerSettings(section)` | Rows in the module's card in the settings tab (Obsidian setting definitions + their values) | removed |
 | `registerSkill(skill)` | `.claude/skills/<name>/SKILL.md` on next install | removed from the next install |
 | `onDispose(fn)` | Any other cleanup (events, intervals, DOM) | called |
 
@@ -34,4 +34,7 @@ add(mod) ──► pending ──start()──► platform ok? ──► enabled
   failures; Claude sees it as `isError: true`.
 - Context providers never return full file contents; cap selections. Claude reads files itself.
 - Settings: `ctx.loadData(defaults)` / `ctx.saveData(data)` store under `modules.<id>.data` in plugin data.
+  Show them with `registerSettings({ title, items, values })`: `items` are Obsidian setting definitions (prefer
+  `control` rows), `values` maps each control key to `{ get, set }`. Keys are the module's own; the settings tab
+  prefixes them (`modules.<id>.<key>`).
 - A module that needs Node APIs must declare `platforms: ["desktop"]` and import Node modules lazily.
