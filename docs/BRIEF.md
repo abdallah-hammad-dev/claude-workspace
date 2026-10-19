@@ -6,9 +6,9 @@
 
 ## 1. Who I am and what I want
 
-I'm Abdallah, a 5th‑year EPITECH student (strong C/C++, Go, TypeScript/Svelte, Linux/KDE). I want **Obsidian to be my personal operating system, with Claude Code as the brain**. Claude must see what I'm working on — exactly like the Claude Code VS Code extension — and act on it: notes, Excalidraw drawings, and later my calendar, tasks and email invites.
+I'm Abdallah, a 5th‑year EPITECH student (strong C/C++, Go, TypeScript/Svelte, Linux/KDE). I want **Obsidian to be my personal operating system, with Claude Code as the brain**. Claude must see what I'm working on — exactly like the Claude Code VS Code extension — and act on it: notes, Excalidraw drawings, and whatever other plugins add as modules.
 
-I'm building this as **one Obsidian plugin with a module system**. The first release is the core (chat + live context + local MCP server) and the Excalidraw module. Calendar, tasks and mail-invites modules come later and must slot in without touching the core.
+I'm building this as **one Obsidian plugin with a module system**. The first release is the core (chat + live context + local MCP server) and the Excalidraw module. Other plugins can register their own modules without touching the core.
 
 Inspiration: [Claudian](https://github.com/YishenTu/claudian) (MIT). It embeds Claude Code in Obsidian well, but it makes UI-level decisions I don't want (e.g. the linked note is frozen after the first message, context is built by the UI). Read its source for patterns (SDK spawning, Windows CLI detection, rendering, permission prompts) — **don't copy it wholesale**; if you reuse code, keep the MIT notice.
 
@@ -20,9 +20,8 @@ Inspiration: [Claudian](https://github.com/YishenTu/claudian) (MIT). It embeds C
 2. **Same setup in the chat view and in the terminal.** Whatever I configure must work identically if I run `claude` in a terminal inside the vault (locally or over SSH). So tools are exposed over a **local HTTP MCP server**, and context is injected by a **hook**, not by hidden prompt-building in the UI.
 3. **Context follows me, VS Code style.** Every message carries what I'm looking at *now*: active file, view type, cursor, selection, selected Excalidraw elements, open tabs. Nothing is frozen per conversation.
 4. **No hidden prompt manipulation.** What I type is what's sent (plus the context block, which is visible in the UI as chips). System prompt = Claude Code preset + a short, documented `append`.
-5. **Standards over custom formats.** Calendar = CalDAV/iCalendar, tasks = `VTODO` and Obsidian markdown, links = `obsidian://` / Advanced URI. Other apps (Apple Calendar, KOrganizer, Thunderbird) must keep working on the same data.
-6. **Modules are plugins-within-the-plugin.** A module registers tools, context providers, views, commands, settings and skills through one API. Core knows nothing about calendars or drawings.
-7. **Local-first and secure.** Servers listen on `127.0.0.1` only, bearer token, reject browser `Origin`, never log tokens or note contents.
+5. **Modules are plugins-within-the-plugin.** A module registers tools, context providers, views, commands, settings and skills through one API. Core knows nothing about drawings or anything else a module handles.
+6. **Local-first and secure.** Servers listen on `127.0.0.1` only, bearer token, reject browser `Origin`, never log tokens or note contents.
 
 ---
 
@@ -43,10 +42,9 @@ Inspiration: [Claudian](https://github.com/YishenTu/claudian) (MIT). It embeds C
 │                                                                            │
 │  modules/                                                                  │
 │   ├─ markdown/    (context provider: cursor, selection, headings)          │
-│   ├─ excalidraw/  (context provider + live canvas tools)    ← v1           │
-│   ├─ tasks/       (later)                                                  │
-│   ├─ calendar/    (later, CalDAV)                                          │
-│   └─ invites/     (later, talks to a Go service on my VPS)                 │
+│   └─ excalidraw/  (context provider + live canvas tools)    ← v1           │
+│                                                                            │
+│  + modules registered by other plugins (plugin.api.registerModule)         │
 └────────────────────────────────────────────────────────────────────────────┘
           ▲  MCP (HTTP) + hook (GET /context)
           │
@@ -84,7 +82,7 @@ interface ContextProvider {
 }
 ```
 
-- Tools are namespaced by module: `excalidraw_get_scene`, `calendar_list_events`…
+- Tools are namespaced by module: `excalidraw_get_scene`, `commands_run`…
 - External plugins may also register modules: expose `plugin.api.registerModule(mod)`.
 - Disabled/unavailable modules register nothing (tools disappear from `tools/list`).
 
@@ -178,21 +176,9 @@ Implementation notes:
 
 ---
 
-## 5. Roadmap (design the core so these drop in)
+## 5. Later modules (design the core so they drop in)
 
-**tasks module** — Obsidian Tasks-style markdown is the authoring surface; tasks with dates sync to CalDAV as `VTODO` (`DUE` = deadline). Tools: list/create/complete tasks, link task ↔ note (`uid` in frontmatter, Advanced URI links).
-
-**calendar module** — my own calendar view inside Obsidian (desktop + mobile).
-- Source of truth: my **CalDAV server on my VPS** (Radicale or Davis). Obsidian is a client, so Apple Calendar/Reminders and KOrganizer show the same data.
-- Libraries: `ical.js` (parse/serialize, RRULE expansion), CalDAV via `tsdav` or raw `PROPFIND`/`REPORT`/`PUT`/`DELETE` — **all HTTP through Obsidian's `requestUrl`** (CORS on mobile).
-- Three display types: **event** (`VEVENT`, block), **deadline** (`VTODO` with `DUE`, thin line + checkbox), **span** (multi-day all-day `VEVENT`, subtle banner).
-- **Time blocking:** work sessions are `VEVENT`s with `RELATED-TO:<task UID>`; hovering a deadline highlights its sessions; warn when a deadline has no time blocked.
-- Event `URL` → `obsidian://adv-uri?uid=…` so tapping in Apple Calendar opens the note.
-- Tools: list/create/update/delete events, schedule a task ("tomorrow 2pm"), find free slots.
-
-**invites module + Go service on the VPS** — watches several mailboxes (IMAP IDLE) for `text/calendar` parts (iMIP `REQUEST`/`CANCEL`), logs every scanned invite (account, sender, subject, Message-ID, UID) in SQLite, routes per account to a CalDAV collection, dedupes by UID, stores `X-SOURCE-ACCOUNT`/`X-SOURCE-MESSAGE-ID` + a link to the email. Replies (`METHOD:REPLY`) are sent **from the invited account's SMTP**; the service also watches CalDAV for PARTSTAT changes so accepting in Apple Calendar sends the reply too. Obsidian module = dashboard (accounts, scanned invites, open email, accept/decline). References: calbridge, calmailproc (Go).
-
-Each later module = its own milestone, its own skill, its own tests. The core should need no changes; if it does, the Module API was wrong — fix the API, not the module.
+Other plugins register their own modules through `plugin.api.registerModule`. Each later module = its own milestone, its own skill, its own tests. The core should need no changes; if it does, the Module API was wrong — fix the API, not the module.
 
 ---
 
@@ -204,7 +190,6 @@ Each later module = its own milestone, its own skill, its own tests. The core sh
 - **M3 — ChatView MVP.** Streaming, markdown, tool blocks, permissions, stop, resume, context chips. Context injected exactly once.
 - **M4 — ChatView polish.** Diffs, `@` picker, images, tabs/sessions, model & permission pickers, usage indicator, Windows path detection.
 - **M5 — Hardening.** Error surfaces, reconnects, port conflicts, settings UI, docs, release build.
-- Then: tasks → calendar → invites.
 
 ---
 
@@ -217,7 +202,7 @@ Each later module = its own milestone, its own skill, its own tests. The core sh
 ## 8. Environment & constraints
 
 - I use **Windows and Fedora KDE** on separate machines; Claude Code is installed natively on Linux and in **WSL** on Windows. Support: native Windows CLI path, Linux, macOS (I may switch to a Mac). If Obsidian runs on Windows and Claude Code only in WSL, document the limitation (127.0.0.1 differences, mirrored networking) and prefer installing Claude Code natively on Windows.
-- Desktop only for the ChatView (spawns processes). The calendar view must also work on **Obsidian mobile** (iPhone): no Node APIs there, `requestUrl` only.
+- Desktop only for the ChatView (spawns processes). The plugin must still load on **Obsidian mobile** (iPhone): no Node APIs there, `requestUrl` only.
 - My vault will later be synced to my VPS; secrets must never live in synced notes.
 
 ---

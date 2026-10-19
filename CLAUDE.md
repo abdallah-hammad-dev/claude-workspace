@@ -20,7 +20,7 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
 - Never write to the user's real vault (`C:\Users\abdal\Documents\aaa`). Only `test-vault/` or a marked test vault.
 - Never log tokens, note contents or tool arguments.
 - Plugin is a thin host: agent logic stays in Claude Code (MCP, hooks, skills, settings).
-- Core knows nothing about drawings/calendars/tasks. If a module needs a core change, fix the Module API.
+- Core knows nothing about what modules handle (drawings…). If a module needs a core change, fix the Module API.
 
 ## Layout
 - `src/main.ts` — plugin; creates registry + ContextEngine; `await import("./desktop")` only on desktop.

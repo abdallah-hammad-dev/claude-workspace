@@ -1,6 +1,6 @@
 /**
- * Module API — the only surface modules see. Core knows nothing about drawings,
- * calendars or tasks; it only collects what modules register here.
+ * Module API — the only surface modules see. Core knows nothing about what
+ * modules handle (drawings…); it only collects what modules register here.
  *
  * Every `register*` call is scoped to the module: when the module is disabled
  * or unloaded, everything it registered is disposed automatically.
