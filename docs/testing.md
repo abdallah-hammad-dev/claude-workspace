@@ -107,3 +107,25 @@ Needs Obsidian 1.12.2+ with Settings → General → Command line interface on, 
       until switched on in "Obsidian CLI commands"; `eval`/`dev:…` are never listed.
 - [ ] From WSL, without the MCP server: `Obsidian.com vault=cw-test-vault eval code="…registry.list()…"` works
       for quick checks (Obsidian's CLI goes through Windows interop, not 127.0.0.1).
+
+## Instructions (CLAUDE.md and skills)
+
+- [ ] Settings → Claude Workspace → "Instructions": **Vault instructions** says *Create* when there is no
+      `CLAUDE.md`. Clicking it creates the file (a comment explaining what to write), closes settings and opens
+      it in a new tab. Reopen settings → the button says *Open*.
+- [ ] "Folder instructions" → **+** → pick a folder → `<folder>/CLAUDE.md` is created and opened; the folder is
+      listed (also after closing and reopening settings). Right-click a folder in the file list: *Add Claude
+      instructions*, or *Open Claude instructions* when it has one.
+- [ ] In Claude Code, `/context` → the vault `CLAUDE.md` is under Memory files and its comment isn't sent.
+- [ ] "Skills" shows e.g. "2 from modules". The page lists module skills (click → read-only view with where it
+      comes from) and "Your skills" (empty state at first).
+- [ ] **+** → name `Weekly Review` is refused (lowercase rule), `excalidraw` too (taken); `weekly-review` with a
+      description and instructions → added, listed, `.claude/skills/weekly-review/SKILL.md` has them. `/` in the
+      chat lists it after a new conversation.
+- [ ] Click it → edit, rename to `week-review` → the folder is renamed (other files in it follow). **×** → asks,
+      then moves the folder to the trash.
+- [ ] Module skills carry the "Installed by Claude Workspace…" comment after their frontmatter. Replace the
+      `excalidraw` skill's text with your own (no comment), then **Install again** → a notice says it was kept;
+      the Skills page lists it under yours with a note.
+- [ ] Turn the Excalidraw module off → its skill is still listed under "From modules" as left by a module that is
+      off; its viewer has **Delete**.

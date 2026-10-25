@@ -1,6 +1,7 @@
 import type { App, DataAdapter } from "obsidian";
 import type { SkillDef } from "../core/module-api";
 import { isInstalled, mergeClaudeSettings, mergeMcpJson, type InstallTarget } from "./installer-merge";
+import { isInstalledSkill, markInstalled, skillFile, SkillStore } from "./skills";
 
 const MCP_JSON = ".mcp.json";
 const SETTINGS = ".claude/settings.json";
@@ -9,6 +10,14 @@ export interface InstallReport {
   written: string[];
   /** Files that contain the token; shown so the user can gitignore them. */
   secretFiles: string[];
+  /** Module skills not written because the user has a skill of that name. */
+  keptSkills: string[];
+}
+
+export interface SkillsReport {
+  written: string[];
+  /** Files left alone: the user's own skill has the module skill's name. */
+  kept: string[];
 }
 
 /**
@@ -41,24 +50,32 @@ export class Installer {
     await this.fs.write(SETTINGS, JSON.stringify(settings, null, 2) + "\n");
     const written = [MCP_JSON, SETTINGS];
 
-    written.push(...(await this.writeSkills(skills)));
-    return { written, secretFiles: [MCP_JSON, SETTINGS] };
+    const report = await this.writeSkills(skills);
+    return { written: [...written, ...report.written], secretFiles: [MCP_JSON, SETTINGS], keptSkills: report.kept };
   }
 
-  /** Write module skills to `.claude/skills/<name>/SKILL.md`, only when they changed. */
-  async writeSkills(skills: SkillDef[]): Promise<string[]> {
-    const written: string[] = [];
+  /**
+   * Write module skills to `.claude/skills/<name>/SKILL.md`, marked as installed, only when they changed.
+   * A SKILL.md without the mark is the user's and is kept, unless it is the module's text from before the mark existed.
+   */
+  async writeSkills(skills: SkillDef[]): Promise<SkillsReport> {
+    const report: SkillsReport = { written: [], kept: [] };
+    const store = new SkillStore(this.fs);
     for (const skill of skills) {
-      const dir = `.claude/skills/${skill.name}`;
-      const file = `${dir}/SKILL.md`;
-      if ((await this.fs.exists(file)) && (await this.fs.read(file)) === skill.markdown) continue;
-      await this.ensureDir(".claude");
-      await this.ensureDir(".claude/skills");
-      await this.ensureDir(dir);
-      await this.fs.write(file, skill.markdown);
-      written.push(file);
+      const file = skillFile(skill.name);
+      const markdown = markInstalled(skill.markdown);
+      if (await this.fs.exists(file)) {
+        const current = await this.fs.read(file);
+        if (current === markdown) continue;
+        if (!isInstalledSkill(current) && current !== skill.markdown) {
+          report.kept.push(file);
+          continue;
+        }
+      }
+      await store.write(skill.name, markdown);
+      report.written.push(file);
     }
-    return written;
+    return report;
   }
 
   private async readJson(path: string): Promise<unknown> {

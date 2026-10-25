@@ -2,7 +2,7 @@ import { appendFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { homedir } from "node:os";
 import type { McpServerConfig } from "@anthropic-ai/claude-agent-sdk";
-import { debounce, Notice } from "obsidian";
+import { debounce, Notice, TFolder } from "obsidian";
 import { vaultBasePath } from "../core/paths";
 import { createLogger, setLogSink } from "../core/logger";
 import type ClaudeWorkspacePlugin from "../main";
@@ -13,7 +13,9 @@ import { defaultPortFor, generateToken } from "./http-guard";
 import { Installer } from "./Installer";
 import { mcpAddCommand, type InstallTarget } from "./installer-merge";
 import { connectionSettings } from "./connection-settings";
+import { InstructionsSettings, instructionsPath, openInstructions, type ModuleSkill } from "./instructions-settings";
 import { McpHost, SERVER_NAME, type ServedContext } from "./McpHost";
+import { closeSettings, openSettings as openSettingsTab } from "./settings-window";
 import { createVoice } from "./voice";
 
 export interface DesktopServices {
@@ -76,11 +78,23 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
   await restartServer();
 
   const installer = new Installer(app);
+  /** Skills of the loaded modules, with the module that registers each. */
+  const moduleSkills = (): ModuleSkill[] => {
+    const markdown = new Map(plugin.registry.getSkills().map((s) => [s.name, s.markdown]));
+    return plugin.registry.list().flatMap((m) =>
+      plugin.registry.contentsOf(m.id).skills.map((name) => ({ name, module: m.name, markdown: markdown.get(name) ?? "" })),
+    );
+  };
   const install = async () => {
     try {
-      await installer.install(target(), plugin.registry.getSkills());
+      const report = await installer.install(target(), plugin.registry.getSkills());
       // Details (files written, token) are in the plugin settings; keep the first-run message plain.
       new Notice("Vault connected: Claude now sees the note or drawing you're working in. Restart `claude` if it's open in a terminal.", 8000);
+      for (const file of report.keptSkills) {
+        const skill = moduleSkills().find((s) => file.endsWith(`/${s.name}/SKILL.md`));
+        const theirs = skill ? `the ${skill.module} module's skill` : "the module's skill";
+        new Notice(`Claude Workspace: ${file} is one of your skills, so ${theirs} of that name wasn't installed. Rename yours to get it.`, 10000);
+      }
     } catch (e) {
       new Notice(`Claude Workspace: install failed — ${e instanceof Error ? e.message : String(e)}`, 10000);
     }
@@ -91,8 +105,9 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
     () =>
       void installer.status(target()).then(async (ok) => {
         if (!ok) return;
-        const written = await installer.writeSkills(plugin.registry.getSkills());
+        const { written, kept } = await installer.writeSkills(plugin.registry.getSkills());
         if (written.length) writeLog("info", `updated skills: ${written.join(", ")}`);
+        if (kept.length) writeLog("info", `kept the user's skills of the same name: ${kept.join(", ")}`);
       }),
     500,
     true,
@@ -106,11 +121,7 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
   };
 
   const voiceLog = createLogger("voice", () => plugin.data.debug);
-  const openSettings = () => {
-    const setting = (app as unknown as { setting?: { open(): void; openTabById(id: string): void } }).setting;
-    setting?.open();
-    setting?.openTabById(plugin.manifest.id);
-  };
+  const openSettings = () => openSettingsTab(app, plugin.manifest.id);
   const voice = createVoice({
     app,
     prefs: () => plugin.data.voice,
@@ -204,7 +215,24 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
     name: "Copy `claude mcp add` command (register for all projects)",
     callback: () => void navigator.clipboard.writeText(mcpAddCommand(target())).then(() => new Notice("Copied")),
   });
+  // Folder instructions from the file explorer: Claude Code reads a folder's CLAUDE.md when it works with files there.
+  plugin.registerEvent(
+    app.workspace.on("file-menu", (menu, file) => {
+      if (!(file instanceof TFolder) || file.isRoot()) return;
+      const exists = !!app.vault.getFileByPath(instructionsPath(file.path));
+      menu.addItem((item) =>
+        item
+          .setTitle(exists ? "Open Claude instructions" : "Add Claude instructions")
+          .setIcon("bot")
+          .onClick(() => void openInstructions(app, file.path)),
+      );
+    }),
+  );
 
+  const instructions = new InstructionsSettings({ app, moduleSkills, closeSettings: () => closeSettings(app) });
+  plugin.registerEvent(app.vault.on("create", (f) => instructions.fileChanged(f.path)));
+  plugin.registerEvent(app.vault.on("delete", (f) => instructions.fileChanged(f.path)));
+  plugin.registerEvent(app.vault.on("rename", (f, old) => instructions.fileChanged(f.path, old)));
   plugin.coreSettingsSections.push(
     (refresh) =>
       connectionSettings(
@@ -238,6 +266,7 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
         },
         refresh,
       ),
+    (refresh) => instructions.block(refresh),
     () => voice.settings(),
   );
 

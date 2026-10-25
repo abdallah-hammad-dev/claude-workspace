@@ -4,6 +4,8 @@
  */
 import { ChatView, type ChatHost } from "../../src/desktop/chat/ChatView";
 import { connectionSettings } from "../../src/desktop/connection-settings";
+import { InstructionsSettings } from "../../src/desktop/instructions-settings";
+import { markInstalled } from "../../src/desktop/skills";
 import { voiceSettings } from "../../src/desktop/voice/voice-settings";
 import type { VoiceService } from "../../src/desktop/voice/service";
 import { ModuleRegistry } from "../../src/core/ModuleRegistry";
@@ -24,6 +26,24 @@ document.body.classList.add(params.get("theme") === "dark" ? "theme-dark" : "the
 const files = ["Welcome.md", "Projects/Alpha.md", "Projects/Beta.md", "Drawings/Architecture.excalidraw.md", "Daily/2026-10-11.md"].map(
   (p) => new TFile(p),
 );
+// Instructions for the settings: the vault's CLAUDE.md and one folder's.
+if (scenario.startsWith("settings")) files.push(new TFile("CLAUDE.md"), new TFile("Projects/CLAUDE.md"));
+
+/** `.claude/skills`, read through the vault adapter: one skill of the user's, the two the modules install. */
+const hidden = new Map<string, string>([
+  [
+    ".claude/skills/weekly-review/SKILL.md",
+    '---\nname: weekly-review\ndescription: "Review the week: what changed in each project and what comes next. Use when the user asks for a weekly review."\n---\n\n1. List the notes changed this week.\n',
+  ],
+]);
+const adapter = {
+  exists: async (p: string) => hidden.has(p) || [...hidden.keys()].some((k) => k.startsWith(`${p}/`)),
+  read: async (p: string) => hidden.get(p) ?? "",
+  list: async (p: string) => ({
+    files: [],
+    folders: [...new Set([...hidden.keys()].filter((k) => k.startsWith(`${p}/`)).map((k) => `${p}/${k.slice(p.length + 1).split("/")[0]}`))],
+  }),
+};
 const app: any = {
   workspace: {
     getLastOpenFiles: () => ["Projects/Alpha.md", "Welcome.md"],
@@ -35,7 +55,12 @@ const app: any = {
     getLeavesOfType: () => [],
     on: () => ({}),
   },
-  vault: { getFiles: () => files, getAbstractFileByPath: (p: string) => files.find((f) => f.path === p) ?? null },
+  vault: {
+    getFiles: () => files,
+    getAbstractFileByPath: (p: string) => files.find((f) => f.path === p) ?? null,
+    getFileByPath: (p: string) => files.find((f) => f.path === p) ?? null,
+    adapter,
+  },
   plugins: { plugins: { "obsidian-excalidraw-plugin": { manifest: { name: "Excalidraw", version: "2.29.0" } } } },
   cli: { handlers: cliHandlers() },
   commands: { commands: { "daily-notes:goto-today": { id: "daily-notes:goto-today", name: "Open today's daily note" } }, executeCommandById: () => true },
@@ -94,9 +119,19 @@ const registry = new ModuleRegistry({
 });
 for (const m of builtinModules) registry.add(m);
 new CliBridge(app, registry).sync();
+const instructions = new InstructionsSettings({
+  app,
+  moduleSkills: () => {
+    const markdown = new Map(registry.getSkills().map((sk) => [sk.name, sk.markdown]));
+    return registry.list().flatMap((m) => registry.contentsOf(m.id).skills.map((name) => ({ name, module: m.name, markdown: markdown.get(name) ?? "" })));
+  },
+  closeSettings: () => undefined,
+});
 
 async function main(): Promise<void> {
   await registry.start();
+  // What the installer writes for the loaded modules.
+  for (const sk of registry.getSkills()) hidden.set(`.claude/skills/${sk.name}/SKILL.md`, markInstalled(sk.markdown));
   if (scenario.startsWith("settings")) await renderSettings();
   else await renderChat();
   (window as any).__ready = true;
@@ -106,7 +141,7 @@ async function main(): Promise<void> {
 
 async function renderSettings(): Promise<void> {
   // settings: everything set up. settings-first-run: Claude Code not found, server down, vault not connected, voice off.
-  // settings-cli-page: the "Excalidraw CLI commands" page.
+  // settings-cli-page: the "Excalidraw CLI commands" page. settings-skills-page: the "Skills" page.
   const firstRun = scenario === "settings-first-run";
   const frame = document.body.createDiv({ cls: "modal mod-settings cw-preview-settings" });
   const content = frame.createDiv({ cls: "vertical-tab-content-container" });
@@ -136,6 +171,7 @@ async function renderSettings(): Promise<void> {
           },
           refresh,
         ),
+      (refresh: () => void) => instructions.block(refresh),
       () =>
         voiceSettings({
           prefs: () => voice,
@@ -148,9 +184,10 @@ async function renderSettings(): Promise<void> {
   content.appendChild(tab.containerEl);
   tab.update(); // what addSettingTab does; it draws too, since the tab is in the page
   await tick();
-  if (scenario === "settings-cli-page") {
+  const pageName = { "settings-cli-page": "Excalidraw CLI commands", "settings-skills-page": "Skills" }[scenario];
+  if (pageName) {
     // Obsidian opens a page by drawing its items in place of the tab's.
-    const page = tab.settingItems.flatMap((g) => ("items" in g ? (g.items ?? []) : [])).find((r) => "type" in r && r.type === "page" && r.name === "Excalidraw CLI commands");
+    const page = tab.settingItems.flatMap((g) => ("items" in g ? (g.items ?? []) : [])).find((r) => "type" in r && r.type === "page" && r.name === pageName);
     tab.settingItems = page && "items" in page ? (page.items ?? []) : [];
     tab.display();
     return;

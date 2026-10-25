@@ -40,9 +40,10 @@ const SCENARIOS = [
   ["chat-paste", 420, 1100],
   ["chat-context-preview", 420, 860],
   ["chat-voice", 420, 860],
-  ["settings", 760, 2900],
+  ["settings", 760, 3300],
   ["settings-first-run", 760, 1600],
   ["settings-cli-page", 760, 1100],
+  ["settings-skills-page", 760, 700],
 ];
 const wanted = process.argv.slice(2);
 const run = SCENARIOS.filter(([name]) => !wanted.length || wanted.includes(name));

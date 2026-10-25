@@ -33,6 +33,10 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   tool-render (icons, plain-language permission wording, diffs), modals (conversation picker).
 - `src/desktop/connection-settings.ts` — settings "Connection" section (definitions + values); no Node imports
   (preview-friendly).
+- `src/desktop/instructions-settings.ts` — settings "Instructions" (vault and folder `CLAUDE.md`, "Skills" page,
+  skill editor/viewer modals, folder picker); no Node imports. `skills.ts` — SKILL.md parse/compose (Obsidian's
+  `getFrontMatterInfo`/`parseYaml`/`stringifyYaml`), name rules, installed marker, `SkillStore` (vault adapter,
+  reaches `.claude`). `settings-window.ts` — the `app.setting` adapter (open/close the settings window).
 - `src/desktop/voice/` — voice input: `providers.ts` (pure: OpenAI-compatible request/response, defaults),
   `audio.ts` (pure: WAV, silence check), `MicRecording.ts` (AudioWorklet capture), `index.ts` (service:
   keychain, requestUrl), `voice-settings.ts`; the button is `chat/MicButton.ts`.
@@ -79,7 +83,8 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   loads on mobile — check with `npm run check:mobile` after a build.
 - **Undocumented Obsidian APIs** are isolated in one adapter file each and make their module "unavailable"
   if missing: `app.commands` (commands module, `src/modules/commands/registry.ts`), `app.plugins.plugins`
-  (`src/core/plugins.ts`), `app.cli.handlers` (`src/modules/cli/handlers.ts`).
+  (`src/core/plugins.ts`), `app.cli.handlers` (`src/modules/cli/handlers.ts`), `app.setting`
+  (`src/desktop/settings-window.ts`; without it the buttons just don't close/open settings).
 - **Modules for a plugin** (2026-10-25): `WorkspaceModule.plugin = { id, minVersion? }`, the plugin's manifest id
   as Obsidian uses it; `minVersion` is ours (Obsidian has no plugin dependencies), modeled on `minAppVersion`.
   The registry loads such a module only while the plugin is loaded and recent enough (`unavailable` + `reason`
@@ -95,6 +100,18 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   the plugin had a CLI can't know about it); overlap is resolved by the user's switches. Per-command switches
   live on a settings sub-page; a change saves module data and calls `registry.reload(id)`. Verified with
   Excalidraw 2.29.0 in Obsidian 1.14.5: 14 tools, `status`/`list`/`read` answer through the tools.
+- **Instructions in settings** (2026-10-25): the plugin edits Claude Code's own files, it adds no prompt of its
+  own. Vault `CLAUDE.md` (Open/Create, opens as a note in a new tab and closes settings), folder `CLAUDE.md`
+  files (a `list` with a + that picks a folder; also a folder's right-click menu), and a "Skills" page: your
+  skills in a `list` (+ new, click to edit, × to delete with a confirmation, to the system trash), module skills
+  read-only. New files get a short template whose hint is a block HTML comment, which Claude Code strips from
+  CLAUDE.md before Claude sees it (documented). The installer puts `INSTALLED_MARKER` after a module skill's
+  frontmatter: a marked SKILL.md (or the module's exact unmarked text, from before the marker) is overwritten on
+  install, any other SKILL.md of that name is the user's and is kept (Notice on install, logged on sync).
+  A marked skill whose module is off stays on disk and is listed with a Delete in its viewer. Since the tab
+  draws the definitions of its last `update()`, vault create/delete/rename of a `CLAUDE.md` calls `update()`;
+  `.claude` is hidden from the vault events, so skills are re-read when the Skills row draws (`displayValue`)
+  and the tab updates only if they changed.
 - **Settings show module contents** via `ModuleRegistry.contentsOf(id)`, computed from live registrations
   (only for loaded modules).
 - **Settings tab is declarative** (Obsidian 1.13 `getSettingDefinitions`, `minAppVersion` 1.13.2 for the
@@ -171,7 +188,9 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
 - Checking the real app from WSL: `Obsidian.com vault=cw-test-vault eval code="…"` (Windows interop, no NAT
   issue), `plugin:reload id=claude-workspace` after a deploy. On this machine settings open in a popout window;
   `dev:screenshot` captures the main window only, so capture with
-  `require('@electron/remote').BrowserWindow…webContents.capturePage()` inside `eval`.
+  `require('@electron/remote').BrowserWindow…webContents.capturePage()` inside `eval`. The settings DOM is in
+  `app.setting.win.document`. `capturePage()` of that (unfocused) window can return the previous frame: call
+  `webContents.invalidate()`, capture once, wait, capture again.
 - WSL here runs in **NAT** networking mode: `claude` inside WSL cannot reach Obsidian's `127.0.0.1` server on
   Windows. Test with the native Windows `claude.exe` (installed at `%USERPROFILE%\.local\bin\claude.exe`).
 - Agent SDK ≥0.3's "built-in executable" is a ~240 MB per-platform native binary — can't ship in a plugin.

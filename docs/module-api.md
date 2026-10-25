@@ -30,7 +30,7 @@ add(mod) ──► pending ──start()──► platform ok? ──► enabled
 | `registerView(type, factory)` | Obsidian view type | leaves detached; placeholder until reload |
 | `registerCommand(cmd)` | Command `claude-workspace:<module>-<id>` | `plugin.removeCommand` |
 | `registerSettings(section)` | Rows in the module's card in the settings tab (Obsidian setting definitions + their values; a `page` row opens a sub-page) | removed |
-| `registerSkill(skill)` | `.claude/skills/<name>/SKILL.md` on next install | removed from the next install |
+| `registerSkill(skill)` | `.claude/skills/<name>/SKILL.md` once the vault is connected, marked as installed by the plugin; a user's own skill of that name is kept | no longer written; the file stays until the user deletes it (Settings → Skills) |
 | `onDispose(fn)` | Any other cleanup (events, intervals, DOM) | called |
 
 ## Rules

@@ -1530,6 +1530,54 @@ button.cw-mic-btn.is-working {
   font-size: var(--font-ui-smaller);
   color: var(--text-muted);
 }
+/* Skills and folder instructions: a skill's description can be long; two lines are enough to recognise it. */
+.cw-skills-list .setting-item-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+/* Skill editor and viewer: the fields take the modal's width, label above. */
+.cw-skill-modal {
+  width: min(680px, 100%);
+}
+.cw-skill-modal .setting-item.cw-skill-field {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.cw-skill-modal .cw-skill-field .setting-item-control {
+  justify-content: stretch;
+}
+.cw-skill-modal .cw-skill-field textarea {
+  width: 100%;
+  resize: vertical;
+}
+.cw-skill-modal .cw-skill-field .setting-item-control:empty {
+  display: none;
+}
+.cw-skill-origin {
+  margin-bottom: 4px;
+  font-size: var(--font-ui-small);
+  color: var(--text-muted);
+}
+.cw-skill-body {
+  max-height: 36vh;
+  overflow-y: auto;
+  padding: 0 16px;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: var(--radius-m);
+  font-size: var(--font-ui-small);
+}
+.cw-skill-error {
+  margin-top: 8px;
+  font-size: var(--font-ui-small);
+  color: var(--text-error);
+}
+.cw-skill-error:empty {
+  display: none;
+}
 
 /* ───────────────────────── motion ───────────────────────── */
 

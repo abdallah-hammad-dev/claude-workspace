@@ -225,3 +225,29 @@ export class Menu {
     return this;
   }
 }
+
+/** Like Obsidian's: `frontmatter` ends with its last newline, `contentStart` is just after the closing `---` line. */
+export function getFrontMatterInfo(content: string): { exists: boolean; frontmatter: string; from: number; to: number; contentStart: number } {
+  const m = /^---\r?\n([\s\S]*?\r?\n)?---(\r?\n|$)/.exec(content);
+  if (!m) return { exists: false, frontmatter: "", from: 0, to: 0, contentStart: 0 };
+  const frontmatter = m[1] ?? "";
+  return { exists: true, frontmatter, from: 4, to: 4 + frontmatter.length, contentStart: m[0].length };
+}
+
+/** Flat `key: value` YAML only; double-quoted values are JSON. */
+export function parseYaml(yaml: string): any {
+  const out: Record<string, unknown> = {};
+  for (const line of yaml.split(/\r?\n/)) {
+    const m = /^([\w-]+):\s*(.*)$/.exec(line);
+    if (!m) continue;
+    const v = m[2]!.trim();
+    out[m[1]!] = v.startsWith('"') ? JSON.parse(v) : v;
+  }
+  return out;
+}
+
+export function stringifyYaml(obj: any): string {
+  return Object.entries(obj as Record<string, unknown>)
+    .map(([k, v]) => `${k}: ${JSON.stringify(v)}\n`)
+    .join("");
+}

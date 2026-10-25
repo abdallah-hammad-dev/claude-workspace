@@ -5,7 +5,7 @@
  */
 import { createElement, icons } from "lucide";
 import { marked } from "marked";
-import type { SettingControl, SettingDefinitionGroup, SettingDefinitionItem, SettingGroup, SettingGroupItem } from "obsidian";
+import type { SettingControl, SettingDefinitionGroup, SettingDefinitionItem, SettingDefinitionList, SettingGroup, SettingGroupItem } from "obsidian";
 
 type DomInfo = {
   cls?: string | string[];
@@ -216,6 +216,28 @@ export class SuggestModal<T> extends Modal {
   setPlaceholder(_p: string): void {}
   declare _t: T;
 }
+export class FuzzySuggestModal<T> extends SuggestModal<T> {}
+
+/** Flat `key: value` frontmatter is all the preview reads; double-quoted values are JSON. */
+export function getFrontMatterInfo(content: string): { exists: boolean; frontmatter: string; from: number; to: number; contentStart: number } {
+  const m = /^---\r?\n([\s\S]*?\r?\n)?---(\r?\n|$)/.exec(content);
+  if (!m) return { exists: false, frontmatter: "", from: 0, to: 0, contentStart: 0 };
+  const frontmatter = m[1] ?? "";
+  return { exists: true, frontmatter, from: 4, to: 4 + frontmatter.length, contentStart: m[0].length };
+}
+export function parseYaml(yaml: string): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const line of yaml.split(/\r?\n/)) {
+    const m = /^([\w-]+):\s*(.*)$/.exec(line);
+    if (m) out[m[1]!] = m[2]!.startsWith('"') ? (JSON.parse(m[2]!) as unknown) : m[2];
+  }
+  return out;
+}
+export function stringifyYaml(obj: Record<string, unknown>): string {
+  return Object.entries(obj)
+    .map(([k, v]) => `${k}: ${JSON.stringify(v)}\n`)
+    .join("");
+}
 
 // ───────────────────────── Menu (real markup) ─────────────────────────
 
@@ -402,7 +424,7 @@ export class SecretComponent extends ValueComponent<string | null> {
   }
 }
 
-class ButtonComponent {
+export class ButtonComponent {
   buttonEl: HTMLButtonElement;
   constructor(parent: HTMLElement) {
     this.buttonEl = document.createElement("button");
@@ -507,6 +529,18 @@ interface RenderedGroup {
   rows: RenderedRow[];
 }
 
+/** The header's + of a list, a row's × (Setting.addExtraButton markup). */
+function extraButton(parent: HTMLElement, icon: string, label: string, run: (el: HTMLElement) => void): void {
+  const b = (parent as unknown as { createDiv(o: string): HTMLElement }).createDiv("clickable-icon extra-setting-button");
+  b.tabIndex = 0;
+  b.setAttribute("aria-label", label);
+  setIcon(b, icon);
+  b.addEventListener("click", (e) => {
+    e.stopPropagation();
+    run(b);
+  });
+}
+
 const isGroup = (d: SettingDefinitionItem): d is SettingDefinitionGroup => "type" in d && (d.type === "group" || d.type === "list");
 const evaluate = (v: boolean | (() => boolean) | undefined, fallback: boolean) => (v === undefined ? fallback : typeof v === "function" ? v() : v);
 
@@ -514,7 +548,7 @@ const evaluate = (v: boolean | (() => boolean) | undefined, fallback: boolean) =
  * Obsidian's SettingTab, rendering `getSettingDefinitions()` roughly like app.js does: rows outside a
  * group go into a group without heading, groups use SettingGroup's markup, `visible`/`disabled` are
  * applied by refreshDomState(). Redraws everything instead of reconciling rows. A page row is drawn but doesn't
- * open (a scenario can draw a page's items instead). Lists' add/delete/reorder, search and number/file/folder/
+ * open (a scenario can draw a page's items instead). A list draws its + and × buttons and its empty state; reorder, search and number/file/folder/
  * slider/color controls are left out until a scenario needs them.
  */
 export class PluginSettingTab {
@@ -575,22 +609,37 @@ export class PluginSettingTab {
   private renderGroup(def: SettingDefinitionGroup): RenderedGroup {
     const div = (p: HTMLElement, cls: string) => (p as unknown as { createDiv(o: string): HTMLElement }).createDiv(cls);
     const el = div(this.containerEl, "setting-group");
-    if (def.type === "list") el.classList.add("mod-list");
+    const list = def.type === "list" ? (def as SettingDefinitionList) : null;
+    if (list) el.classList.add("mod-list");
     if (def.cls) el.classList.add(...def.cls.split(" ").filter(Boolean));
+    if (list) el.classList.add("mod-no-icon");
     if (def.heading) {
       const head = div(el, "setting-item setting-item-heading");
       div(head, "setting-item-name").textContent = def.heading;
-      div(head, "setting-item-control");
+      const control = div(head, "setting-item-control");
+      // A list's add affordance: a + in its header.
+      if (list?.addItem) extraButton(control, "plus", list.addItem.name, list.addItem.action);
     }
     div(el, "setting-group-search");
     const listEl = div(el, "setting-items");
     const group = { listEl } as unknown as SettingGroup;
-    const rows = (def.items ?? []).map((item) => this.renderRow(item, listEl, group));
+    const rows = (def.items ?? []).map((item, i) => {
+      const row = this.renderRow(item, listEl, group, !!list);
+      const onDelete = list?.onDelete;
+      if (onDelete) extraButton(row.setting.controlEl, "x", "Delete", () => onDelete(i));
+      return row;
+    });
+    if (list && !rows.length && list.emptyState) {
+      const empty = new Setting(listEl).setName(list.emptyState);
+      empty.settingEl.classList.add("mod-empty-state");
+    }
     return { def, el, rows };
   }
 
-  private renderRow(def: SettingGroupItem, listEl: HTMLElement, group: SettingGroup): RenderedRow {
+  private renderRow(def: SettingGroupItem, listEl: HTMLElement, group: SettingGroup, inList = false): RenderedRow {
     const setting = new Setting(listEl);
+    // A list's rows keep an (empty) icon slot before their text.
+    if (inList) setting.settingEl.prepend((setting.settingEl as unknown as { createDiv(o: string): HTMLElement }).createDiv("setting-item-icon"));
     const row: RenderedRow = { def, setting };
     setting.setName(def.name);
     setting.setDesc(def.desc ? (typeof def.desc === "string" ? def.desc : (def.desc.cloneNode(true) as DocumentFragment)) : "");

@@ -32,6 +32,10 @@ inside your vault.
   free tier). See [Voice input](#voice-input).
 - **Works from a terminal too.** `claude` started in the vault gets the same context and the same Obsidian
   tools.
+- **Instructions.** In settings, open or create the vault's `CLAUDE.md` (Claude reads it at the start of every
+  conversation) and folder `CLAUDE.md` files (read when Claude works with files in that folder; also from a
+  folder's right-click menu). A *Skills* page lists the skills in `.claude/skills`: write, edit and delete your
+  own, and read the ones modules install.
 - **Modules.** Features come as modules that you turn on or off in settings. The core modules are about Obsidian
   itself; the others are listed under the plugin they are for, with its version:
   - **Obsidian** (always on): open files and report the active context.
@@ -107,7 +111,9 @@ cp main.js manifest.json styles.css "<your vault>/.obsidian/plugins/claude-works
 - **Install** writes these files and merges with what's already there:
   - `.mcp.json`
   - `.claude/settings.json` (the context hook)
-  - `.claude/skills/<name>/SKILL.md`
+  - `.claude/skills/<name>/SKILL.md` for each module's skill, marked by a comment as installed by the plugin.
+    Installing again overwrites a marked skill; a skill of yours with the same name is never overwritten.
+- `CLAUDE.md` files and your own skills are only written when you create or edit them in settings.
 - `.obsidian/plugins/claude-workspace/data.json` holds the settings and the local server token.
   `debug.log` sits next to it, and never contains tokens or note contents.
 - `.mcp.json` and `.claude/settings.json` contain the token. **Keep them out of git and out of any public sync.**
