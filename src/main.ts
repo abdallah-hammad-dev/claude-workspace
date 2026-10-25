@@ -8,6 +8,7 @@ import { mergeData, WorkspaceSettingTab, type CoreSettingsSection, type PluginDa
 import type { DesktopServices } from "./desktop";
 import { builtinModules } from "./modules";
 import { CliBridge } from "./modules/cli";
+import { ShippedModules } from "./modules/shipped";
 
 /** How often to look for plugins turned on, off or updated, and for new CLI commands (Obsidian has no event). */
 const PLUGIN_WATCH_MS = 2000;
@@ -23,6 +24,8 @@ export default class ClaudeWorkspacePlugin extends Plugin {
   api!: ClaudeWorkspaceApi;
   /** Modules for the commands plugins register with Obsidian's CLI. Desktop only, like that CLI. */
   cliBridge: CliBridge | null = null;
+  /** The modules that ship with this plugin; the custom ones (for another plugin) can be deleted and restored. */
+  shippedModules!: ShippedModules;
   private pluginsSeen = "";
   readonly log = createLogger("core", () => this.data?.debug ?? false);
 
@@ -54,10 +57,21 @@ export default class ClaudeWorkspacePlugin extends Plugin {
 
     this.api = {
       version: 1,
-      registerModule: (mod: WorkspaceModule) => this.registry.add(mod),
+      registerModule: (mod: WorkspaceModule) => this.registry.add(mod, { kind: "plugin" }),
     };
 
-    for (const mod of builtinModules) this.registry.add(mod);
+    this.shippedModules = new ShippedModules(this.registry, builtinModules, {
+      deleted: () => this.data.deletedModules,
+      setDeleted: async (ids) => {
+        this.data.deletedModules = ids;
+        await this.persist();
+      },
+      forget: async (id) => {
+        delete this.data.modules[id];
+        await this.persist();
+      },
+    });
+    this.shippedModules.add();
     if (Platform.isDesktopApp) this.cliBridge = new CliBridge(this.app, this.registry);
 
     // Node-only code lives behind a dynamic import so the bundle still loads on mobile.
@@ -103,6 +117,17 @@ export default class ClaudeWorkspacePlugin extends Plugin {
       void this.registry.refreshAvailability();
     }
     this.cliBridge?.sync();
+  }
+
+  /**
+   * Deletes a custom module: it is left out until restored (its code ships here), and its settings and the skills
+   * it installed go.
+   */
+  async deleteModule(id: string): Promise<void> {
+    if (this.registry.list().find((m) => m.id === id)?.origin.kind !== "custom") return;
+    const skills = this.registry.contentsOf(id).skills;
+    await this.shippedModules.delete(id);
+    await this.desktop?.trashModuleSkills(skills);
   }
 
   async persist(): Promise<void> {

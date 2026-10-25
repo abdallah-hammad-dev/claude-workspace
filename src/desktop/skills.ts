@@ -110,4 +110,12 @@ export class SkillStore {
     const dir = `${SKILLS_DIR}/${name}`;
     if (!(await this.fs.trashSystem(dir))) await this.fs.trashLocal(dir);
   }
+
+  /** Trashes the skills a deleted module installed; a skill of that name without the marker is the user's and stays. */
+  async trashInstalled(names: string[]): Promise<void> {
+    for (const name of names) {
+      const file = skillFile(name);
+      if ((await this.fs.exists(file)) && isInstalledSkill(await this.fs.read(file))) await this.trash(name);
+    }
+  }
 }

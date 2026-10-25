@@ -42,6 +42,7 @@ const SCENARIOS = [
   ["chat-voice", 420, 860],
   ["settings", 760, 3300],
   ["settings-first-run", 760, 1600],
+  ["settings-deleted", 760, 3300],
   ["settings-cli-page", 760, 1100],
   ["settings-skills-page", 760, 700],
 ];

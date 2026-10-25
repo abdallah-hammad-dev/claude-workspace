@@ -453,6 +453,33 @@ export class ButtonComponent {
   }
 }
 
+/** Setting.addExtraButton: an icon button (Obsidian's markup). */
+export class ExtraButtonComponent {
+  extraSettingsEl: HTMLElement;
+  constructor(parent: HTMLElement) {
+    this.extraSettingsEl = document.createElement("div");
+    this.extraSettingsEl.className = "clickable-icon extra-setting-button";
+    this.extraSettingsEl.tabIndex = 0;
+    parent.appendChild(this.extraSettingsEl);
+  }
+  setIcon(icon: string): this {
+    setIcon(this.extraSettingsEl, icon);
+    return this;
+  }
+  setTooltip(text: string): this {
+    this.extraSettingsEl.setAttribute("aria-label", text);
+    return this;
+  }
+  setDisabled(d: boolean): this {
+    this.extraSettingsEl.classList.toggle("is-disabled", d);
+    return this;
+  }
+  onClick(cb: () => unknown): this {
+    this.extraSettingsEl.addEventListener("click", () => void cb());
+    return this;
+  }
+}
+
 type Disableable = { setDisabled(d: boolean): unknown };
 
 export class Setting {
@@ -508,6 +535,9 @@ export class Setting {
   }
   addButton(cb: (b: ButtonComponent) => unknown): this {
     return this.add(new ButtonComponent(this.controlEl), cb);
+  }
+  addExtraButton(cb: (b: ExtraButtonComponent) => unknown): this {
+    return this.add(new ExtraButtonComponent(this.controlEl), cb);
   }
   addComponent(cb: (el: HTMLElement) => unknown): this {
     const c = cb(this.controlEl) as Partial<Disableable> | undefined;

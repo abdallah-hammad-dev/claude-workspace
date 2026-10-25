@@ -37,13 +37,16 @@ inside your vault.
   folder's right-click menu). A *Skills* page lists the skills in `.claude/skills`: write, edit and delete your
   own, and read the ones modules install.
 - **Modules.** Features come as modules that you turn on or off in settings. The core modules are about Obsidian
-  itself; the others are listed under the plugin they are for, with its version:
+  itself; the others are listed under the plugin they are for, with its version. Each module says where it comes
+  from: *Built in* (about Obsidian), *Custom* (written for a plugin outside it, like the Excalidraw one), *CLI* or
+  *From plugin* (the plugin's own). Custom modules can be deleted and restored under *Deleted modules*; the others
+  can be turned off.
   - **Obsidian** (always on): open files and report the active context.
   - **Markdown:** cursor, section and selection in notes.
   - **Commands:** search and run command-palette commands from Obsidian and other plugins (with a blocklist).
   - **Obsidian CLI** (off by default): Obsidian's own command-line commands (search, daily notes, properties,
     tasks…) as tools. Developer commands (`eval`, `dev:…`) are never offered.
-  - **Excalidraw:** read, edit, screenshot and zoom the open drawing live (needs the Excalidraw plugin).
+  - **Excalidraw** (custom): read, edit, screenshot and zoom the open drawing live (needs the Excalidraw plugin).
   - **`<Plugin>` CLI:** for every plugin that adds commands to Obsidian's command line (Obsidian 1.12.2+;
     e.g. Excalidraw 2.29+, Templater, QuickAdd), those commands become tools, run inside Obsidian. Found
     automatically; a page in settings has a switch per command.

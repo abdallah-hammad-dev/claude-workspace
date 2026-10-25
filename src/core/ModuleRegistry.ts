@@ -41,6 +41,13 @@ export type ModuleStatus =
   | "unsupported" // wrong platform
   | "failed"; // onload threw
 
+/** Where a module comes from, shown on its card in settings. */
+export type ModuleOrigin =
+  | { kind: "builtin" } // about Obsidian itself, ships with Claude Workspace
+  | { kind: "custom" } // written for a plugin outside it, ships with Claude Workspace
+  | { kind: "cli" } // made from the commands a plugin (or Obsidian) registers with Obsidian's CLI
+  | { kind: "plugin" }; // added by another plugin through `plugin.api.registerModule`
+
 export interface ModuleInfo {
   id: string;
   name: string;
@@ -50,6 +57,7 @@ export interface ModuleInfo {
   /** Why an unavailable module can't load, when there is more to say than "needs its plugin". */
   reason?: string;
   required: boolean;
+  origin: ModuleOrigin;
   /** For modules about a plugin: its id, plus its name and version while it is loaded. */
   plugin?: { id: string; name?: string; version?: string };
 }
@@ -75,6 +83,7 @@ export type RegistryChange = "tools" | "providers" | "views" | "settings" | "ski
 
 interface Entry {
   mod: WorkspaceModule;
+  origin: ModuleOrigin;
   status: ModuleStatus;
   error?: string;
   reason?: string;
@@ -106,11 +115,11 @@ export class ModuleRegistry {
 
   // ───────────────────────── lifecycle ─────────────────────────
 
-  /** Add a module. Loads it right away if the registry is already started. */
-  add(mod: WorkspaceModule): Disposer {
+  /** Add a module. Loads it right away if the registry is already started. Other plugins' modules are `plugin`. */
+  add(mod: WorkspaceModule, origin: ModuleOrigin = { kind: "plugin" }): Disposer {
     if (!MODULE_ID.test(mod.id)) throw new Error(`Invalid module id "${mod.id}" (lowercase letters, digits and hyphens)`);
     if (this.entries.has(mod.id)) throw new Error(`Module "${mod.id}" is already registered`);
-    this.entries.set(mod.id, { mod, status: "pending", disposers: [] });
+    this.entries.set(mod.id, { mod, origin, status: "pending", disposers: [] });
     if (this.started) void this.enqueue(() => this.load(mod.id)).then(() => this.emit("modules"));
     this.emit("modules");
     return () => void this.remove(mod.id);
@@ -185,7 +194,7 @@ export class ModuleRegistry {
   // ───────────────────────── queries ─────────────────────────
 
   list(): ModuleInfo[] {
-    return [...this.entries.values()].map(({ mod, status, error, reason }) => {
+    return [...this.entries.values()].map(({ mod, origin, status, error, reason }) => {
       const loaded = mod.plugin && this.host.getPlugin(mod.plugin.id);
       return {
         id: mod.id,
@@ -195,6 +204,7 @@ export class ModuleRegistry {
         error,
         reason,
         required: !!mod.required,
+        origin,
         plugin: mod.plugin && { id: mod.plugin.id, ...(loaded ? { name: loaded.name, version: loaded.version } : {}) },
       };
     });

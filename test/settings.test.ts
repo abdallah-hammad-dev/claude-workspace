@@ -7,6 +7,7 @@ import type { ModuleInfo } from "../src/core/ModuleRegistry";
 import { mergeData, moduleSections, WorkspaceSettingTab, type CoreSettingsSection } from "../src/core/settings";
 import { connectionSettings, type ConnectionSettingsDeps } from "../src/desktop/connection-settings";
 import { voiceSettings } from "../src/desktop/voice/voice-settings";
+import { ShippedModules } from "../src/modules/shipped";
 
 /** Every row, groups flattened. Pages' rows too when `pages` is set. */
 function rows(items: SettingDefinitionItem[], pages = false): SettingDefinition[] {
@@ -121,7 +122,7 @@ const greeter: WorkspaceModule = {
 };
 
 describe("settings tab", () => {
-  function setup(sections: CoreSettingsSection[] = []) {
+  function setup(sections: CoreSettingsSection[] = [], shipped: WorkspaceModule[] = []) {
     const app = new App();
     const data = mergeData({});
     const registry = new ModuleRegistry({
@@ -139,7 +140,13 @@ describe("settings tab", () => {
       getPlugin: () => null,
     });
     registry.add(greeter);
-    const plugin = { registry, data, persist: vi.fn(async () => undefined), coreSettingsSections: sections, register: () => undefined };
+    const shippedModules = new ShippedModules(registry, shipped, {
+      deleted: () => data.deletedModules,
+      setDeleted: async (ids) => void (data.deletedModules = ids),
+      forget: async (id) => void delete data.modules[id],
+    });
+    shippedModules.add();
+    const plugin = { registry, data, shippedModules, persist: vi.fn(async () => undefined), coreSettingsSections: sections, register: () => undefined };
     const tab = new WorkspaceSettingTab(app as never, plugin as never);
     tab.update(); // what addSettingTab does
     return { tab, registry, data, plugin };
@@ -204,23 +211,77 @@ describe("settings tab", () => {
     await registry.setEnabled("greeter", false);
     expect(rows([card()!]).map((r) => r.name)).toEqual([greeter.name]);
   });
+
+  it("lets only custom modules be deleted; a plugin's own module and CLI modules can only be turned off", async () => {
+    const { tab, registry } = setup();
+    const mod = (id: string): WorkspaceModule => ({ id, name: id, onload: () => undefined });
+    registry.add(mod("shipped-custom"), { kind: "custom" });
+    registry.add(mod("plugins-own"), { kind: "plugin" });
+    registry.add(mod("some-cli"), { kind: "cli" });
+    registry.add(mod("core"), { kind: "builtin" });
+    await registry.start();
+
+    /** Draws a module's first row and says which controls it got. */
+    const controls = (name: string) => {
+      const row = rows(tab.getSettingDefinitions()).find((r) => r.name === name)!;
+      const got: string[] = [];
+      const span = (): unknown => ({ createSpan: span });
+      const toggle = { setValue: () => toggle, setDisabled: () => toggle, onChange: () => toggle };
+      row.render!({
+        nameEl: { createSpan: span },
+        addExtraButton: () => got.push("delete"),
+        addToggle: (cb: (t: typeof toggle) => void) => (got.push("toggle"), cb(toggle)),
+      } as never, {} as never);
+      return got;
+    };
+    expect(controls("shipped-custom")).toEqual(["delete", "toggle"]);
+    expect(controls("plugins-own")).toEqual(["toggle"]);
+    expect(controls("some-cli")).toEqual(["toggle"]);
+    expect(controls("core")).toEqual(["toggle"]);
+  });
+
+  it("lists the shipped modules the user deleted, to restore them", async () => {
+    const drawing: WorkspaceModule = { id: "drawing", name: "Drawing", description: "Edit drawings.", plugin: { id: "draw-plugin" }, onload: () => undefined };
+    const { tab, registry, plugin } = setup([], [drawing]);
+    await registry.start();
+    const deletedGroup = () => tab.settingItems.find((g) => "heading" in g && g.heading === "Deleted modules");
+    expect(deletedGroup()).toBeUndefined();
+
+    await plugin.shippedModules.delete("drawing");
+    tab.update();
+    expect(rows([deletedGroup()!]).map((r) => [r.name, r.desc])).toEqual([["Drawing", "Edit drawings."]]);
+
+    await plugin.shippedModules.restore("drawing");
+    tab.update();
+    expect(deletedGroup()).toBeUndefined();
+  });
 });
 
 describe("moduleSections", () => {
-  const info = (id: string, plugin?: ModuleInfo["plugin"]): ModuleInfo => ({ id, name: id === "excalidraw" ? "Excalidraw" : id, status: "loaded", required: false, plugin });
+  const info = (id: string, plugin?: ModuleInfo["plugin"], origin: ModuleInfo["origin"] = { kind: "builtin" }): ModuleInfo => ({
+    id,
+    name: id === "excalidraw" ? "Excalidraw" : id,
+    status: "loaded",
+    required: false,
+    origin,
+    plugin,
+  });
 
   it("puts modules about Obsidian first, then one section per plugin, named and versioned like the plugin", () => {
     const ex = { id: "obsidian-excalidraw-plugin", name: "Excalidraw", version: "2.29.0" };
     const sections = moduleSections([
       info("obsidian"),
-      info("excalidraw", ex),
+      info("cli", undefined, { kind: "cli" }),
+      info("obsidian-excalidraw-plugin", ex, { kind: "cli" }),
+      info("excalidraw", ex, { kind: "custom" }),
       info("markdown"),
       info("quickadd", { id: "quickadd", name: "QuickAdd", version: "2.1.0" }),
-      info("obsidian-excalidraw-plugin", ex),
+      info("excalidraw-own", ex, { kind: "plugin" }),
     ]);
+    // In a section: built in, the plugin's own, custom, CLI.
     expect(sections.map((s) => [s.heading, s.modules.map((m) => m.id)])).toEqual([
-      ["Core modules", ["obsidian", "markdown"]],
-      ["Excalidraw 2.29.0", ["excalidraw", "obsidian-excalidraw-plugin"]],
+      ["Core modules", ["obsidian", "markdown", "cli"]],
+      ["Excalidraw 2.29.0", ["excalidraw-own", "excalidraw", "obsidian-excalidraw-plugin"]],
       ["QuickAdd 2.1.0", ["quickadd"]],
     ]);
   });

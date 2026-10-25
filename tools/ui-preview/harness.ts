@@ -13,6 +13,7 @@ import { loadedPlugin } from "../../src/core/plugins";
 import { CliBridge } from "../../src/modules/cli";
 import { WorkspaceSettingTab, mergeData } from "../../src/core/settings";
 import { builtinModules } from "../../src/modules";
+import { ShippedModules } from "../../src/modules/shipped";
 import type { ActiveContext } from "../../src/core/module-api";
 import { TFile } from "./obsidian-browser";
 
@@ -117,7 +118,14 @@ const registry = new ModuleRegistry({
   notifyContextChanged: () => undefined,
   getPlugin: (id) => loadedPlugin(app, id),
 });
-for (const m of builtinModules) registry.add(m);
+// settings-deleted: the Excalidraw module (custom, ships with the plugin) was deleted.
+if (scenario === "settings-deleted") data.deletedModules = ["excalidraw"];
+const shippedModules = new ShippedModules(registry, builtinModules, {
+  deleted: () => data.deletedModules,
+  setDeleted: async (ids) => void (data.deletedModules = ids),
+  forget: async () => undefined,
+});
+shippedModules.add();
 new CliBridge(app, registry).sync();
 const instructions = new InstructionsSettings({
   app,
@@ -152,6 +160,8 @@ async function renderSettings(): Promise<void> {
     data,
     persist: async () => undefined,
     register() {},
+    shippedModules,
+    deleteModule: async () => undefined,
     coreSettingsSections: [
       (refresh: () => void) =>
         connectionSettings(

@@ -46,6 +46,9 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
 - `src/core/plugins.ts` — the `app.plugins` adapter (loaded plugins: id, name, version) + `compareVersions`.
 - `src/modules/cli/` — CLI modules: `handlers.ts` (`app.cli.handlers` adapter), `bridge.ts` (pure: grouping by
   plugin, tool names, flag → zod), `index.ts` (`CliBridge`: adds/reloads/removes one module per plugin).
+- `src/modules/shipped.ts` — `ShippedModules`: adds the built-in list with each module's origin, deletes and
+  restores the custom ones (`data.deletedModules`).
+- `src/core/ConfirmModal.ts` — "Delete …?" dialog shared by the settings tab and the Instructions section.
 - `src/core/module-api.ts` — the Module API (types only + `ToolError`). No MCP/Agent SDK types here.
 - `src/core/ModuleRegistry.ts` — loads modules, collects registrations, scoped disposal, change events.
 - `src/core/settings.ts` — persisted data shape + declarative settings tab (`getSettingDefinitions`).
@@ -100,6 +103,17 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   the plugin had a CLI can't know about it); overlap is resolved by the user's switches. Per-command switches
   live on a settings sub-page; a change saves module data and calls `registry.reload(id)`. Verified with
   Excalidraw 2.29.0 in Obsidian 1.14.5: 14 tools, `status`/`list`/`read` answer through the tools.
+- **Module origins and custom modules** (2026-10-25): every module is about Obsidian itself or about one plugin,
+  and its card shows where it comes from (`registry.add(mod, origin)`, default `plugin`). The user's words: **Built
+  in** = about Obsidian itself (obsidian, markdown, commands); **Custom** = written for a plugin outside that
+  plugin, i.e. a shipped module with `plugin` (Excalidraw: "this one isn't from Excalidraw, it is a custom module",
+  "made by the user technically"); **CLI**; **From plugin** = the plugin's own module via the API. Only custom
+  modules can be deleted: trash icon next to the toggle → confirmation → left out until restored under "Deleted
+  modules" (`ShippedModules`, `data.deletedModules`), its settings and the skills it installed (marked) go too. A
+  plugin's own module is treated like its CLI module: it can only be turned off (test "lets only custom modules be
+  deleted"). Module files in the vault (`.claude/obsidian-modules`, a "Your modules" section) were built from a
+  misread question and removed the same day: "modules are for plugins", "it is always about a plugin". Verified in
+  Obsidian 1.14.5 (test vault): the Excalidraw module deleted (tools and skill gone, CLI module kept) and restored.
 - **Instructions in settings** (2026-10-25): the plugin edits Claude Code's own files, it adds no prompt of its
   own. Vault `CLAUDE.md` (Open/Create, opens as a note in a new tab and closes settings), folder `CLAUDE.md`
   files (a `list` with a + that picks a folder; also a folder's right-click menu), and a "Skills" page: your

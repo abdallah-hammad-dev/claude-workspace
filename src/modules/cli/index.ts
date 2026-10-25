@@ -50,7 +50,7 @@ export class CliBridge {
     for (const [id, group] of next) {
       const old = this.groups.get(id);
       this.groups.set(id, group);
-      if (!old) this.disposers.set(id, this.registry.add(this.module(id, group, cli)));
+      if (!old) this.disposers.set(id, this.registry.add(this.module(id, group, cli), { kind: "cli" }));
       else if (JSON.stringify(old) !== JSON.stringify(group)) void this.registry.reload(id);
     }
   }

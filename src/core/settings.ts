@@ -2,6 +2,7 @@ import {
   debounce,
   PluginSettingTab,
   setIcon,
+  setTooltip,
   type App,
   type SettingDefinition,
   type SettingDefinitionGroup,
@@ -9,8 +10,9 @@ import {
   type SettingGroupItem,
 } from "obsidian";
 import type ClaudeWorkspacePlugin from "../main";
+import { ConfirmModal } from "./ConfirmModal";
 import type { ControlValue, SettingsSection } from "./module-api";
-import type { ModuleContents, ModuleInfo, ModuleRegistry, ModuleStatus } from "./ModuleRegistry";
+import type { ModuleContents, ModuleInfo, ModuleOrigin, ModuleRegistry, ModuleStatus } from "./ModuleRegistry";
 
 export interface ModuleSettings {
   enabled?: boolean;
@@ -58,6 +60,8 @@ export interface PluginData {
   voice: VoicePrefs;
   /** The chat panel is opened automatically once, so new users find it. */
   chatShownOnce: boolean;
+  /** Ids of the custom modules shipped with the plugin that the user deleted (restorable in settings). */
+  deletedModules: string[];
 }
 
 export const DEFAULT_DATA: PluginData = {
@@ -69,6 +73,7 @@ export const DEFAULT_DATA: PluginData = {
   // Groq's free tier, prefilled; any OpenAI-compatible endpoint works (desktop/voice/providers.ts).
   voice: { enabled: false, url: "https://api.groq.com/openai/v1", model: "whisper-large-v3-turbo", secret: "", language: "", live: true },
   chatShownOnce: false,
+  deletedModules: [],
 };
 
 export function mergeData(saved: unknown): PluginData {
@@ -80,6 +85,7 @@ export function mergeData(saved: unknown): PluginData {
     server: { ...DEFAULT_DATA.server, ...s.server },
     chat: { ...DEFAULT_DATA.chat, ...s.chat },
     voice: { ...DEFAULT_DATA.voice, ...s.voice },
+    deletedModules: Array.isArray(s.deletedModules) ? s.deletedModules.filter((id) => typeof id === "string") : [],
   };
 }
 
@@ -91,6 +97,31 @@ const BADGES: Record<ModuleStatus, { text: string; tone: string }> = {
   unsupported: { text: "Desktop only", tone: "off" },
   failed: { text: "Error", tone: "error" },
 };
+
+/** Shown next to a module's status: where it comes from. */
+const ORIGINS: Record<ModuleOrigin["kind"], { text: string; icon: string }> = {
+  builtin: { text: "Built in", icon: "package" },
+  custom: { text: "Custom", icon: "code" },
+  cli: { text: "CLI", icon: "terminal" },
+  plugin: { text: "From plugin", icon: "plug" },
+};
+
+/** Within a section: the plugin's own module, then custom ones, then its CLI. */
+const ORIGIN_ORDER: ModuleOrigin["kind"][] = ["builtin", "plugin", "custom", "cli"];
+
+function originTooltip(info: ModuleInfo): string {
+  const plugin = info.plugin?.name ?? "another plugin";
+  switch (info.origin.kind) {
+    case "builtin":
+      return "About Obsidian itself; comes with Claude Workspace.";
+    case "custom":
+      return `Written for ${plugin}, outside it; comes with Claude Workspace.`;
+    case "cli":
+      return "Made from the commands registered with Obsidian's command line.";
+    case "plugin":
+      return "Added by another plugin.";
+  }
+}
 
 /** Part of the settings tab: Obsidian setting definitions, and where the values of their `control` rows live, by key. */
 export interface SettingsBlock {
@@ -123,7 +154,7 @@ export class WorkspaceSettingTab extends PluginSettingTab {
 
   override getSettingDefinitions(): SettingDefinitionItem[] {
     const refresh = () => this.update();
-    const blocks = [...this.plugin.coreSettingsSections.map((section) => section(refresh)), this.modules(), this.advanced()];
+    const blocks = [...this.plugin.coreSettingsSections.map((section) => section(refresh)), this.modules(), this.deleted(), this.advanced()];
     this.values = new Map(blocks.flatMap((b) => Object.entries(b.values)));
     return blocks.flatMap((b) => b.items);
   }
@@ -136,13 +167,17 @@ export class WorkspaceSettingTab extends PluginSettingTab {
     await this.values.get(key)?.set(value);
   }
 
-  /** One card per module (name and status, on/off, what it adds, its own settings), under its section's heading. */
+  /**
+   * One card per module (name, status and origin, on/off, what it adds, its own settings), under its section's
+   * heading. Custom modules have a trash button.
+   */
   private modules(): SettingsBlock {
     const { registry } = this.plugin;
     const values: Record<string, ControlValue> = {};
     const items = moduleSections(registry.list()).flatMap(({ heading, modules }) =>
       modules.map((info, i): SettingDefinitionGroup => {
-        const rows: SettingGroupItem[] = [moduleRow(info, registry)];
+        const remove = info.origin.kind === "custom" ? () => this.confirmDelete(info) : undefined;
+        const rows: SettingGroupItem[] = [moduleRow(info, registry, remove)];
         if (info.status === "loaded") {
           rows.push(contentsRow(registry.contentsOf(info.id)));
           for (const { section } of registry.getSettingsSections().filter((x) => x.moduleId === info.id)) {
@@ -153,6 +188,43 @@ export class WorkspaceSettingTab extends PluginSettingTab {
       }),
     );
     return { items, values };
+  }
+
+  private confirmDelete(info: ModuleInfo): void {
+    const skills = this.plugin.registry.contentsOf(info.id).skills.map((name) => `.claude/skills/${name}`);
+    const also = skills.length ? `Its settings and the skill it installed (${skills.join(", ")}) go too.` : "Its settings go too.";
+    new ConfirmModal(
+      this.app,
+      `Delete the ${info.name} module?`,
+      `Removes it from Claude Workspace; you can restore it under Deleted modules. ${also}`,
+      "Delete",
+      () => this.plugin.deleteModule(info.id),
+    ).open();
+  }
+
+  /** The custom modules that ship with the plugin and were deleted, with Restore. Nothing when there are none. */
+  private deleted(): SettingsBlock {
+    const deleted = this.plugin.shippedModules.deleted();
+    if (!deleted.length) return { items: [], values: {} };
+    return {
+      items: [
+        {
+          type: "group",
+          heading: "Deleted modules",
+          cls: "cw-module-group",
+          items: deleted.map(
+            (mod): SettingDefinition => ({
+              name: mod.name,
+              desc: mod.description ?? "",
+              render: (setting) => {
+                setting.addButton((b) => b.setButtonText("Restore").onClick(() => this.plugin.shippedModules.restore(mod.id)));
+              },
+            }),
+          ),
+        },
+      ],
+      values: {},
+    };
   }
 
   private advanced(): SettingsBlock {
@@ -191,12 +263,14 @@ export interface ModuleSection {
 
 /**
  * Modules about Obsidian itself first, then one section per plugin, named and versioned like the plugin
- * ("Excalidraw 2.29.0"; the module's own name while the plugin isn't loaded), each in the order modules were added.
+ * ("Excalidraw 2.29.0"; the module's own name while the plugin isn't loaded). In a section: built in, the plugin's
+ * own, custom, CLI; otherwise in the order added.
  */
 export function moduleSections(list: ModuleInfo[]): ModuleSection[] {
-  const core = list.filter((m) => !m.plugin);
+  const sorted = [...list].sort((a, b) => ORIGIN_ORDER.indexOf(a.origin.kind) - ORIGIN_ORDER.indexOf(b.origin.kind));
+  const core = sorted.filter((m) => !m.plugin);
   const byPlugin = new Map<string, ModuleInfo[]>();
-  for (const m of list) if (m.plugin) byPlugin.set(m.plugin.id, [...(byPlugin.get(m.plugin.id) ?? []), m]);
+  for (const m of sorted) if (m.plugin) byPlugin.set(m.plugin.id, [...(byPlugin.get(m.plugin.id) ?? []), m]);
   const plugins = [...byPlugin.values()]
     .map((modules) => {
       const loaded = modules.find((m) => m.plugin?.name)?.plugin;
@@ -206,8 +280,11 @@ export function moduleSections(list: ModuleInfo[]): ModuleSection[] {
   return [...(core.length ? [{ heading: "Core modules", modules: core }] : []), ...plugins];
 }
 
-/** Name with a status badge, description, on/off toggle. A render row for the badge. */
-function moduleRow(info: ModuleInfo, registry: ModuleRegistry): SettingDefinition {
+/**
+ * Name with a status badge and the module's origin, description, a trash button when it can be deleted, on/off
+ * toggle. A render row for the badges.
+ */
+function moduleRow(info: ModuleInfo, registry: ModuleRegistry, remove?: () => void): SettingDefinition {
   const badge =
     info.required && info.status === "loaded"
       ? { text: "Always on", tone: "ok" }
@@ -219,6 +296,12 @@ function moduleRow(info: ModuleInfo, registry: ModuleRegistry): SettingDefinitio
     desc: info.error ? `Error: ${info.error}` : (info.reason ?? info.description ?? ""),
     render: (setting) => {
       setting.nameEl.createSpan({ cls: `cw-badge is-${badge.tone}`, text: badge.text });
+      const origin = ORIGINS[info.origin.kind];
+      const originEl = setting.nameEl.createSpan({ cls: "cw-module-origin" });
+      setIcon(originEl.createSpan({ cls: "cw-module-origin-icon" }), origin.icon);
+      originEl.createSpan({ text: origin.text });
+      setTooltip(originEl, originTooltip(info));
+      if (remove) setting.addExtraButton((b) => b.setIcon("trash-2").setTooltip("Delete this module").onClick(remove));
       setting.addToggle((t) =>
         t
           .setValue(registry.isEnabled(info.id))

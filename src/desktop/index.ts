@@ -16,10 +16,13 @@ import { connectionSettings } from "./connection-settings";
 import { InstructionsSettings, instructionsPath, openInstructions, type ModuleSkill } from "./instructions-settings";
 import { McpHost, SERVER_NAME, type ServedContext } from "./McpHost";
 import { closeSettings, openSettings as openSettingsTab } from "./settings-window";
+import { SkillStore } from "./skills";
 import { createVoice } from "./voice";
 
 export interface DesktopServices {
   host: McpHost;
+  /** Trashes the skills a deleted module installed (not the user's own of the same name). */
+  trashModuleSkills(names: string[]): Promise<void>;
   dispose(): Promise<void>;
 }
 
@@ -274,6 +277,7 @@ export async function startDesktop(plugin: ClaudeWorkspacePlugin): Promise<Deskt
 
   return {
     host,
+    trashModuleSkills: (names) => new SkillStore(app.vault.adapter).trashInstalled(names),
     dispose: async () => {
       setLogSink(null);
       unpatchEvents();

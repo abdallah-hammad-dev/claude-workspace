@@ -11,6 +11,7 @@ import {
   type SettingDefinitionPage,
   type TFolder,
 } from "obsidian";
+import { ConfirmModal } from "../core/ConfirmModal";
 import type { SettingsBlock } from "../core/settings";
 import {
   composeSkill,
@@ -356,40 +357,6 @@ class SkillViewModal extends Modal {
 
   override onClose(): void {
     this.component.unload();
-    this.contentEl.empty();
-  }
-}
-
-class ConfirmModal extends Modal {
-  constructor(
-    app: App,
-    private readonly title: string,
-    private readonly text: string,
-    private readonly confirm: string,
-    private readonly run: () => Promise<void>,
-  ) {
-    super(app);
-  }
-
-  override onOpen(): void {
-    this.setTitle(this.title);
-    this.contentEl.createEl("p", { text: this.text });
-    const buttons = this.contentEl.createDiv({ cls: "modal-button-container" });
-    new ButtonComponent(buttons).setButtonText("Cancel").onClick(() => this.close());
-    new ButtonComponent(buttons)
-      .setButtonText(this.confirm)
-      .setWarning()
-      .onClick(async () => {
-        this.close();
-        try {
-          await this.run();
-        } catch (e) {
-          new Notice(`Claude Workspace: ${e instanceof Error ? e.message : String(e)}`);
-        }
-      });
-  }
-
-  override onClose(): void {
     this.contentEl.empty();
   }
 }

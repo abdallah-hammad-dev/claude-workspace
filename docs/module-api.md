@@ -67,3 +67,20 @@ add(mod) ──► pending ──start()──► platform ok? ──► enabled
   any palette command (`command`, which would bypass the Obsidian commands module's blocklist).
 - A plugin module and a CLI module for the same plugin are shown side by side, under the plugin. Neither knows
   about the other; the user resolves any overlap with the switches.
+
+## Origins
+
+`registry.add(mod, origin)` records where a module comes from, shown on its card:
+
+| Origin | Label | What |
+|---|---|---|
+| `builtin` | Built in | Ships here, about Obsidian itself (no `plugin`) |
+| `custom` | Custom | Ships here, written for a plugin outside that plugin (it has a `plugin`; `ShippedModules`) |
+| `cli` | CLI | Made from Obsidian CLI commands |
+| `plugin` | From plugin | The default: added through `plugin.api.registerModule` |
+
+Every module is about Obsidian itself or about one plugin. Only custom modules can be deleted: a trash button next
+to the toggle (confirmed; `plugin.deleteModule`) leaves the module out (`data.deletedModules`) until it is restored
+under "Deleted modules"; its settings and the skills it installed (marked SKILL.md, not the user's own) go too. A
+plugin's own module and CLI modules can only be turned off. In every section the order is built in, the plugin's
+own, custom, CLI.

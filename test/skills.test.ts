@@ -104,6 +104,15 @@ describe("SkillStore", () => {
     expect(trashed).toEqual([".claude/skills/b"]);
     expect((await store.list()).map((s) => s.name)).toEqual(["c"]);
   });
+
+  it("trashes the skills a deleted module installed, not the user's own of that name", async () => {
+    const { fs, trashed } = memoryAdapter({
+      ".claude/skills/drawing/SKILL.md": markInstalled(MODULE_SKILL),
+      ".claude/skills/review/SKILL.md": MODULE_SKILL,
+    });
+    await new SkillStore(fs).trashInstalled(["drawing", "review", "gone"]);
+    expect(trashed).toEqual([".claude/skills/drawing"]);
+  });
 });
 
 describe("Installer.writeSkills", () => {

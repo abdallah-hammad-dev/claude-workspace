@@ -65,7 +65,10 @@ describe("ModuleRegistry", () => {
     registry.add(fullModule());
     await registry.start();
 
-    expect(registry.list()).toEqual([{ id: "demo", name: "demo", description: undefined, status: "loaded", error: undefined, required: false }]);
+    expect(registry.list()).toEqual([
+      // Modules added without an origin come from other plugins, through `plugin.api.registerModule`.
+      { id: "demo", name: "demo", description: undefined, status: "loaded", error: undefined, required: false, origin: { kind: "plugin" } },
+    ]);
     expect(registry.getTools().map((t) => t.def.name)).toEqual(["demo_ping"]);
     expect(registry.getProviders("markdown").map((p) => p.key)).toEqual(["demo.p"]);
     expect(registry.getProviders("excalidraw")).toEqual([]);

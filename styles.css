@@ -1470,6 +1470,26 @@ button.cw-mic-btn.is-working {
   color: var(--text-error);
   background: rgba(var(--color-red-rgb), 0.12);
 }
+/* Where a module comes from: quieter than its status. */
+.cw-module-origin {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--text-faint);
+  font-size: var(--font-ui-smaller);
+  line-height: 1.6;
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+.cw-module-origin-icon {
+  display: inline-block;
+  margin-right: 4px;
+  vertical-align: -2px;
+}
+.cw-module-origin-icon svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
 .cw-module-contents > summary {
   list-style: none;
   display: flex;
