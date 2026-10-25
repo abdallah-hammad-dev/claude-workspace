@@ -513,8 +513,9 @@ const evaluate = (v: boolean | (() => boolean) | undefined, fallback: boolean) =
 /**
  * Obsidian's SettingTab, rendering `getSettingDefinitions()` roughly like app.js does: rows outside a
  * group go into a group without heading, groups use SettingGroup's markup, `visible`/`disabled` are
- * applied by refreshDomState(). Redraws everything instead of reconciling rows. Pages, lists' add/delete/
- * reorder, search and number/file/folder/slider/color controls are left out until a scenario needs them.
+ * applied by refreshDomState(). Redraws everything instead of reconciling rows. A page row is drawn but doesn't
+ * open (a scenario can draw a page's items instead). Lists' add/delete/reorder, search and number/file/folder/
+ * slider/color controls are left out until a scenario needs them.
  */
 export class PluginSettingTab {
   containerEl = document.createElement("div");
@@ -594,8 +595,12 @@ export class PluginSettingTab {
     setting.setName(def.name);
     setting.setDesc(def.desc ? (typeof def.desc === "string" ? def.desc : (def.desc.cloneNode(true) as DocumentFragment)) : "");
     if ("type" in def) {
+      // A page row: its display value, then a chevron (Setting.addDisplayValue + setNavigable).
+      const control = setting.controlEl as unknown as { createDiv(o: string): HTMLElement };
+      const value = typeof def.displayValue === "function" ? def.displayValue() : def.displayValue;
+      if (value) control.createDiv("setting-item-value").textContent = value;
       setting.settingEl.classList.add("mod-navigable", "tappable");
-      setIcon((setting.controlEl as unknown as { createDiv(o: string): HTMLElement }).createDiv("setting-item-chevron"), "chevron-right");
+      setIcon(control.createDiv("setting-item-chevron"), "chevron-right");
     } else if (def.action) {
       const action = def.action;
       setting.settingEl.classList.add("mod-action", "tappable");

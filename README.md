@@ -32,11 +32,17 @@ inside your vault.
   free tier). See [Voice input](#voice-input).
 - **Works from a terminal too.** `claude` started in the vault gets the same context and the same Obsidian
   tools.
-- **Modules.** Features come as modules that you turn on or off in settings:
+- **Modules.** Features come as modules that you turn on or off in settings. The core modules are about Obsidian
+  itself; the others are listed under the plugin they are for, with its version:
   - **Obsidian** (always on): open files and report the active context.
   - **Markdown:** cursor, section and selection in notes.
   - **Commands:** search and run command-palette commands from Obsidian and other plugins (with a blocklist).
+  - **Obsidian CLI** (off by default): Obsidian's own command-line commands (search, daily notes, properties,
+    tasks…) as tools. Developer commands (`eval`, `dev:…`) are never offered.
   - **Excalidraw:** read, edit, screenshot and zoom the open drawing live (needs the Excalidraw plugin).
+  - **`<Plugin>` CLI:** for every plugin that adds commands to Obsidian's command line (Obsidian 1.12.2+;
+    e.g. Excalidraw 2.29+, Templater, QuickAdd), those commands become tools, run inside Obsidian. Found
+    automatically; a page in settings has a switch per command.
 
 ## Requirements
 
@@ -190,8 +196,17 @@ Releasing a new version (also what BRAT users receive): see [`docs/releasing.md`
 
 ```ts
 const cw = app.plugins.plugins["claude-workspace"]?.api;
-const dispose = cw?.registerModule({ id: "mymod", name: "My module", onload(ctx) { /* ctx.registerTool(…) */ } });
+const dispose = cw?.registerModule({
+  id: "mymod",
+  name: "My module",
+  // Optional: the plugin it is for (its manifest id) and the lowest version it works with.
+  plugin: { id: "my-plugin", minVersion: "1.2.0" },
+  onload(ctx) { /* ctx.registerTool(…) */ },
+});
 ```
+
+A module with `plugin` loads only while that plugin is enabled and recent enough, and the settings tab lists it
+under the plugin's name, next to the plugin's CLI module if it has one.
 
 ## Credits
 

@@ -3,12 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import type { ModuleContext, WorkspaceModule } from "../src/core/module-api";
 import { ModuleRegistry, type RegistryHost } from "../src/core/ModuleRegistry";
-import { helloModule } from "../src/modules/dummy";
+import { compareVersions, type PluginInfo } from "../src/core/plugins";
 
-function setup(opts: { platform?: "desktop" | "mobile"; enabled?: Record<string, boolean> } = {}) {
+function setup(opts: { platform?: "desktop" | "mobile"; enabled?: Record<string, boolean>; plugins?: PluginInfo[] } = {}) {
   const app = new App();
   const plugin = new Plugin(app);
   const enabled: Record<string, boolean> = { ...opts.enabled };
+  /** Loaded Obsidian plugins; tests change it to turn plugins on and off. */
+  const plugins: PluginInfo[] = [...(opts.plugins ?? [])];
   const data: Record<string, object> = {};
   const host: RegistryHost = {
     app: app as never,
@@ -28,8 +30,9 @@ function setup(opts: { platform?: "desktop" | "mobile"; enabled?: Record<string,
     getActiveContext: () => Promise.resolve({ activeFile: null, providers: {}, openTabs: [] }),
     getActiveView: () => null,
     notifyContextChanged: () => undefined,
+    getPlugin: (id) => plugins.find((p) => p.id === id) ?? null,
   };
-  return { registry: new ModuleRegistry(host), app, plugin, enabled, data };
+  return { registry: new ModuleRegistry(host), app, plugin, enabled, data, plugins };
 }
 
 /** A module that registers one of everything. */
@@ -180,6 +183,8 @@ describe("ModuleRegistry", () => {
   it("rejects invalid and duplicate module ids", () => {
     const { registry } = setup();
     expect(() => registry.add(fullModule("Bad-Id"))).toThrow(/Invalid module id/);
+    expect(() => registry.add(fullModule("bad_id"))).toThrow(/Invalid module id/);
+    registry.add(fullModule("obsidian-excalidraw-plugin")); // a plugin's manifest id is fine
     registry.add(fullModule("x"));
     expect(() => registry.add(fullModule("x"))).toThrow(/already registered/);
   });
@@ -230,21 +235,7 @@ describe("ModuleRegistry", () => {
   });
 });
 
-describe("hello module", () => {
-  it("is off by default and its tool echoes when enabled", async () => {
-    const { registry } = setup();
-    registry.add(helloModule);
-    await registry.start();
-    expect(registry.list()[0]?.status).toBe("disabled");
-
-    await registry.setEnabled("hello", true);
-    const tool = registry.getTool("hello_echo")!;
-    const out = await tool.def.handler({ message: "world" }, { signal: new AbortController().signal });
-    expect(out).toBe("Hello, world");
-  });
-});
-
-describe("retryUnavailable", () => {
+describe("refreshAvailability", () => {
   it("loads a module once its dependency appears", async () => {
     const { registry } = setup();
     let present = false;
@@ -252,9 +243,71 @@ describe("retryUnavailable", () => {
     await registry.start();
     expect(registry.list()[0]?.status).toBe("unavailable");
     present = true;
-    await registry.retryUnavailable();
+    await registry.refreshAvailability();
     expect(registry.list()[0]?.status).toBe("loaded");
     expect(registry.getTools()).toHaveLength(1);
+  });
+});
+
+describe("modules for a plugin", () => {
+  const excalidraw = (version: string): PluginInfo => ({ id: "obsidian-excalidraw-plugin", name: "Excalidraw", version });
+
+  it("load only while their plugin is loaded, and say which plugin they are for", async () => {
+    const { registry, plugins } = setup();
+    registry.add(fullModule("draw", { plugin: { id: "obsidian-excalidraw-plugin" } }));
+    await registry.start();
+    expect(registry.list()[0]).toMatchObject({ status: "unavailable", reason: undefined, plugin: { id: "obsidian-excalidraw-plugin" } });
+
+    plugins.push(excalidraw("2.28.1"));
+    await registry.refreshAvailability();
+    expect(registry.list()[0]).toMatchObject({ status: "loaded", plugin: { id: "obsidian-excalidraw-plugin", name: "Excalidraw", version: "2.28.1" } });
+
+    // Turned off in Obsidian: the module goes away with it.
+    plugins.pop();
+    await registry.refreshAvailability();
+    expect(registry.list()[0]?.status).toBe("unavailable");
+    expect(registry.getTools()).toEqual([]);
+  });
+
+  it("wait for the minimum version and say why", async () => {
+    const { registry, plugins } = setup({ plugins: [excalidraw("2.28.1")] });
+    registry.add(fullModule("draw", { plugin: { id: "obsidian-excalidraw-plugin", minVersion: "2.29.0" } }));
+    await registry.start();
+    expect(registry.list()[0]).toMatchObject({
+      status: "unavailable",
+      reason: "Needs Excalidraw 2.29.0 or newer; 2.28.1 is installed.",
+    });
+
+    plugins[0] = excalidraw("2.29.0");
+    await registry.refreshAvailability();
+    expect(registry.list()[0]).toMatchObject({ status: "loaded", reason: undefined });
+  });
+
+  it("can be reloaded to register something else", async () => {
+    const { registry } = setup();
+    let tools = ["a"];
+    registry.add({
+      id: "dyn",
+      name: "dyn",
+      onload(ctx) {
+        for (const t of tools) ctx.registerTool({ name: `dyn_${t}`, description: "", inputSchema: {}, handler: async () => null });
+      },
+    });
+    await registry.start();
+    tools = ["b", "c"];
+    await registry.reload("dyn");
+    expect(registry.getTools().map((t) => t.def.name)).toEqual(["dyn_b", "dyn_c"]);
+  });
+});
+
+describe("compareVersions", () => {
+  it("compares part by part, as numbers, with pre-releases first", () => {
+    expect(compareVersions("2.29.0", "2.28.1")).toBe(1);
+    expect(compareVersions("2.9.0", "2.10.0")).toBe(-1);
+    expect(compareVersions("2.29", "2.29.0")).toBe(0);
+    expect(compareVersions("2.29.0-beta-1", "2.29.0")).toBe(-1);
+    expect(compareVersions("2.29.0", "2.29.0-beta-1")).toBe(1);
+    expect(compareVersions("1.0.0-beta-1", "1.0.0-beta-2")).toBe(-1);
   });
 });
 

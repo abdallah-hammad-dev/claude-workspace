@@ -6,6 +6,7 @@ import {
   type SettingDefinition,
   type SettingDefinitionGroup,
   type SettingDefinitionItem,
+  type SettingGroupItem,
 } from "obsidian";
 import type ClaudeWorkspacePlugin from "../main";
 import type { ControlValue, SettingsSection } from "./module-api";
@@ -135,20 +136,22 @@ export class WorkspaceSettingTab extends PluginSettingTab {
     await this.values.get(key)?.set(value);
   }
 
-  /** One card per module: name and status, on/off, what it adds, its own settings. */
+  /** One card per module (name and status, on/off, what it adds, its own settings), under its section's heading. */
   private modules(): SettingsBlock {
     const { registry } = this.plugin;
     const values: Record<string, ControlValue> = {};
-    const items = registry.list().map((info, i): SettingDefinitionGroup => {
-      const rows = [moduleRow(info, registry)];
-      if (info.status === "loaded") {
-        rows.push(contentsRow(registry.contentsOf(info.id)));
-        for (const { section } of registry.getSettingsSections().filter((x) => x.moduleId === info.id)) {
-          rows.push(...scoped(`modules.${info.id}`, section, values));
+    const items = moduleSections(registry.list()).flatMap(({ heading, modules }) =>
+      modules.map((info, i): SettingDefinitionGroup => {
+        const rows: SettingGroupItem[] = [moduleRow(info, registry)];
+        if (info.status === "loaded") {
+          rows.push(contentsRow(registry.contentsOf(info.id)));
+          for (const { section } of registry.getSettingsSections().filter((x) => x.moduleId === info.id)) {
+            rows.push(...scoped(`modules.${info.id}`, section, values));
+          }
         }
-      }
-      return { type: "group", heading: i === 0 ? "Modules" : undefined, cls: "cw-module-group", items: rows };
-    });
+        return { type: "group", heading: i === 0 ? heading : undefined, cls: "cw-module-group", items: rows };
+      }),
+    );
     return { items, values };
   }
 
@@ -181,12 +184,39 @@ export class WorkspaceSettingTab extends PluginSettingTab {
   }
 }
 
+export interface ModuleSection {
+  heading: string;
+  modules: ModuleInfo[];
+}
+
+/**
+ * Modules about Obsidian itself first, then one section per plugin, named and versioned like the plugin
+ * ("Excalidraw 2.29.0"; the module's own name while the plugin isn't loaded), each in the order modules were added.
+ */
+export function moduleSections(list: ModuleInfo[]): ModuleSection[] {
+  const core = list.filter((m) => !m.plugin);
+  const byPlugin = new Map<string, ModuleInfo[]>();
+  for (const m of list) if (m.plugin) byPlugin.set(m.plugin.id, [...(byPlugin.get(m.plugin.id) ?? []), m]);
+  const plugins = [...byPlugin.values()]
+    .map((modules) => {
+      const loaded = modules.find((m) => m.plugin?.name)?.plugin;
+      return { heading: loaded?.name ? [loaded.name, loaded.version].filter(Boolean).join(" ") : modules[0]!.name, modules };
+    })
+    .sort((a, b) => a.heading.localeCompare(b.heading));
+  return [...(core.length ? [{ heading: "Core modules", modules: core }] : []), ...plugins];
+}
+
 /** Name with a status badge, description, on/off toggle. A render row for the badge. */
 function moduleRow(info: ModuleInfo, registry: ModuleRegistry): SettingDefinition {
-  const badge = info.required && info.status === "loaded" ? { text: "Always on", tone: "ok" } : BADGES[info.status];
+  const badge =
+    info.required && info.status === "loaded"
+      ? { text: "Always on", tone: "ok" }
+      : info.status === "unavailable" && info.reason
+        ? { text: "Plugin too old", tone: "warn" }
+        : BADGES[info.status];
   return {
     name: info.name,
-    desc: info.error ? `Error: ${info.error}` : (info.description ?? ""),
+    desc: info.error ? `Error: ${info.error}` : (info.reason ?? info.description ?? ""),
     render: (setting) => {
       setting.nameEl.createSpan({ cls: `cw-badge is-${badge.tone}`, text: badge.text });
       setting.addToggle((t) =>
@@ -212,15 +242,18 @@ function contentsRow(c: ModuleContents): SettingDefinition {
   };
 }
 
-/** A module's rows, with control keys prefixed so that modules can't collide. */
-function scoped(prefix: string, section: SettingsSection, values: Record<string, ControlValue>): SettingDefinition[] {
-  return section.items.map((def) => {
-    if (!def.control) return def;
-    const key = `${prefix}.${def.control.key}`;
-    const value = section.values[def.control.key];
+/** A module's rows, sub-pages included, with control keys prefixed so that modules can't collide. */
+function scoped(prefix: string, section: SettingsSection, values: Record<string, ControlValue>): SettingGroupItem[] {
+  const scope = <T extends SettingDefinitionItem>(def: T): T => {
+    if ("type" in def) return def.items ? { ...def, items: def.items.map(scope) } : def;
+    const row = def as SettingDefinition;
+    if (!row.control) return def;
+    const key = `${prefix}.${row.control.key}`;
+    const value = section.values[row.control.key];
     if (value) values[key] = value;
-    return { ...def, control: { ...def.control, key } };
-  });
+    return { ...row, control: { ...row.control, key } } as T;
+  };
+  return section.items.map(scope);
 }
 
 /** Collapsible "what this module adds", inside the module's card. */

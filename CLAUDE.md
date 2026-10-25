@@ -39,6 +39,9 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
 - `tools/ui-preview/` — browser stand-in for `obsidian` (including a renderer for setting definitions modeled on
   Obsidian's app.js) + scenarios + screenshot script (dev only).
 - `src/modules/obsidian` (core tools, required), `src/modules/markdown` (cursor/section/selection).
+- `src/core/plugins.ts` — the `app.plugins` adapter (loaded plugins: id, name, version) + `compareVersions`.
+- `src/modules/cli/` — CLI modules: `handlers.ts` (`app.cli.handlers` adapter), `bridge.ts` (pure: grouping by
+  plugin, tool names, flag → zod), `index.ts` (`CliBridge`: adds/reloads/removes one module per plugin).
 - `src/core/module-api.ts` — the Module API (types only + `ToolError`). No MCP/Agent SDK types here.
 - `src/core/ModuleRegistry.ts` — loads modules, collects registrations, scoped disposal, change events.
 - `src/core/settings.ts` — persisted data shape + declarative settings tab (`getSettingDefinitions`).
@@ -76,7 +79,22 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   loads on mobile — check with `npm run check:mobile` after a build.
 - **Undocumented Obsidian APIs** are isolated in one adapter file each and make their module "unavailable"
   if missing: `app.commands` (commands module, `src/modules/commands/registry.ts`), `app.plugins.plugins`
-  (Excalidraw availability check).
+  (`src/core/plugins.ts`), `app.cli.handlers` (`src/modules/cli/handlers.ts`).
+- **Modules for a plugin** (2026-10-25): `WorkspaceModule.plugin = { id, minVersion? }`, the plugin's manifest id
+  as Obsidian uses it; `minVersion` is ours (Obsidian has no plugin dependencies), modeled on `minAppVersion`.
+  The registry loads such a module only while the plugin is loaded and recent enough (`unavailable` + `reason`
+  otherwise) and unloads it when the plugin goes away (`refreshAvailability`). Settings: "Core modules" (no
+  `plugin`), then one section per plugin headed "<name> <version>". Module ids may contain hyphens (so a
+  plugin's id fits). Obsidian has no plugin enable/disable event: `main.ts` polls loaded plugins every 2 s
+  (`watchPlugins`, which also runs the CLI bridge) and on `visibilitychange`. This replaced the old retry on
+  `layout-change`/`active-leaf-change`.
+- **CLI modules** (2026-10-25): every command registered with `Plugin.registerCliHandler` becomes a tool run in
+  process (no shell): one module per plugin (id = manifest id, name "<Plugin> CLI"), `cli` for Obsidian's own
+  (off by default). Rules in `docs/module-api.md` § CLI modules. A handwritten module and the CLI module of the
+  same plugin are shown side by side and never reference each other (the user's call: a module written before
+  the plugin had a CLI can't know about it); overlap is resolved by the user's switches. Per-command switches
+  live on a settings sub-page; a change saves module data and calls `registry.reload(id)`. Verified with
+  Excalidraw 2.29.0 in Obsidian 1.14.5: 14 tools, `status`/`list`/`read` answer through the tools.
 - **Settings show module contents** via `ModuleRegistry.contentsOf(id)`, computed from live registrations
   (only for loaded modules).
 - **Settings tab is declarative** (Obsidian 1.13 `getSettingDefinitions`, `minAppVersion` 1.13.2 for the
@@ -144,6 +162,16 @@ Behavioral reference for M1–M2: `reference/claude-bridge/main.js` (prototype, 
   `"name":[[` or `name:[[`). The preview marks unknown icons red.
 
 ## Gotchas
+- Settings pages: Obsidian finds a `page` definition by name (`id ?? name`; `id` isn't in the public type) among
+  all of the tab's pages, groups being transparent. Two pages with the same name open the first one. Hence
+  "<module name> commands".
+- Claude API: tool input property names must match `^[a-zA-Z0-9_.-]{1,64}$`; one bad name breaks the whole tools
+  list. CLI flags like help's `<command>` are dropped.
+- Chromium throttles timers in a hidden window to about once a minute (seen: 0 polls in 5 s with Obsidian hidden).
+- Checking the real app from WSL: `Obsidian.com vault=cw-test-vault eval code="…"` (Windows interop, no NAT
+  issue), `plugin:reload id=claude-workspace` after a deploy. On this machine settings open in a popout window;
+  `dev:screenshot` captures the main window only, so capture with
+  `require('@electron/remote').BrowserWindow…webContents.capturePage()` inside `eval`.
 - WSL here runs in **NAT** networking mode: `claude` inside WSL cannot reach Obsidian's `127.0.0.1` server on
   Windows. Test with the native Windows `claude.exe` (installed at `%USERPROFILE%\.local\bin\claude.exe`).
 - Agent SDK ≥0.3's "built-in executable" is a ~240 MB per-platform native binary — can't ship in a plugin.

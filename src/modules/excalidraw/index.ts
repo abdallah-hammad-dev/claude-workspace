@@ -1,4 +1,4 @@
-import type { App, View, WorkspaceLeaf } from "obsidian";
+import type { View, WorkspaceLeaf } from "obsidian";
 import { z } from "zod";
 import { toVaultPath, vaultBasePath } from "../../core/paths";
 import { ToolError, type ModuleContext, type WorkspaceModule } from "../../core/module-api";
@@ -8,7 +8,6 @@ import { normalizeSelection, summarize, type ElementSummary } from "./scene";
 import { EXCALIDRAW_SKILL } from "./skill";
 
 export const EXCALIDRAW_VIEW = "excalidraw";
-const PLUGIN_ID = "obsidian-excalidraw-plugin";
 const MAX_SELECTED_IN_CONTEXT = 20;
 const SELECTION_POLL_MS = 800;
 
@@ -26,7 +25,7 @@ export const excalidrawModule: WorkspaceModule = {
   name: "Excalidraw",
   description: "Claude sees the selected elements of the open drawing and can read, edit, screenshot and focus it live.",
   platforms: ["desktop"],
-  isAvailable: (app) => !!pluginsOf(app)[PLUGIN_ID],
+  plugin: { id: "obsidian-excalidraw-plugin" },
 
   onload(ctx) {
     const pathArg = z.string().optional().describe("Vault path of an open drawing; omit for the one the user is looking at");
@@ -168,10 +167,6 @@ export const excalidrawModule: WorkspaceModule = {
     ctx.onDispose(() => window.clearInterval(timer));
   },
 };
-
-function pluginsOf(app: App): Record<string, unknown> {
-  return (app as unknown as { plugins?: { plugins?: Record<string, unknown> } }).plugins?.plugins ?? {};
-}
 
 function eaFor(view: View): EA {
   const g = (window as unknown as { ExcalidrawAutomate?: ExcalidrawAutomateGlobal }).ExcalidrawAutomate;

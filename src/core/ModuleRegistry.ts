@@ -7,12 +7,14 @@ import type {
   Disposer,
   ModuleContext,
   ModulePlatform,
+  PluginRequirement,
   RegisteredTool,
   SettingsSection,
   SkillDef,
   ToolDef,
   WorkspaceModule,
 } from "./module-api";
+import { compareVersions, type PluginInfo } from "./plugins";
 
 /** What the registry needs from the plugin. Kept narrow so tests can fake it. */
 export interface RegistryHost {
@@ -27,13 +29,15 @@ export interface RegistryHost {
   getActiveContext(): Promise<ActiveContext>;
   getActiveView(): View | null;
   notifyContextChanged(): void;
+  /** The plugin with this manifest id, if it is enabled and loaded. */
+  getPlugin(id: string): PluginInfo | null;
 }
 
 export type ModuleStatus =
   | "pending" // added, registry not started yet
   | "loaded"
   | "disabled" // toggled off by the user
-  | "unavailable" // isAvailable() returned false
+  | "unavailable" // its plugin isn't loaded or is too old, or isAvailable() returned false
   | "unsupported" // wrong platform
   | "failed"; // onload threw
 
@@ -43,7 +47,11 @@ export interface ModuleInfo {
   description?: string;
   status: ModuleStatus;
   error?: string;
+  /** Why an unavailable module can't load, when there is more to say than "needs its plugin". */
+  reason?: string;
   required: boolean;
+  /** For modules about a plugin: its id, plus its name and version while it is loaded. */
+  plugin?: { id: string; name?: string; version?: string };
 }
 
 /** What a loaded module added, for the settings page. */
@@ -69,10 +77,11 @@ interface Entry {
   mod: WorkspaceModule;
   status: ModuleStatus;
   error?: string;
+  reason?: string;
   disposers: Disposer[];
 }
 
-const MODULE_ID = /^[a-z][a-z0-9]*$/;
+const MODULE_ID = /^[a-z][a-z0-9-]*$/;
 const SKILL_NAME = /^[a-z0-9][a-z0-9-]*$/;
 
 export class ModuleRegistry {
@@ -99,7 +108,7 @@ export class ModuleRegistry {
 
   /** Add a module. Loads it right away if the registry is already started. */
   add(mod: WorkspaceModule): Disposer {
-    if (!MODULE_ID.test(mod.id)) throw new Error(`Invalid module id "${mod.id}" (lowercase letters and digits)`);
+    if (!MODULE_ID.test(mod.id)) throw new Error(`Invalid module id "${mod.id}" (lowercase letters, digits and hyphens)`);
     if (this.entries.has(mod.id)) throw new Error(`Module "${mod.id}" is already registered`);
     this.entries.set(mod.id, { mod, status: "pending", disposers: [] });
     if (this.started) void this.enqueue(() => this.load(mod.id)).then(() => this.emit("modules"));
@@ -130,24 +139,35 @@ export class ModuleRegistry {
     });
   }
 
-  /** Retry modules whose dependency was missing (e.g. Excalidraw enabled after us). */
-  async retryUnavailable(): Promise<void> {
+  /**
+   * Plugins load in any order and can be turned on, off or updated at any time: load the modules whose
+   * dependency is now there, unload the ones whose plugin went away.
+   */
+  async refreshAvailability(): Promise<void> {
     if (!this.started) return;
-    const ids = [...this.entries.values()].filter((e) => e.status === "unavailable").map((e) => e.mod.id);
+    const ids = [...this.entries.values()]
+      .filter((e) => e.status === "unavailable" || (e.status === "loaded" && e.mod.plugin && this.pluginGap(e.mod.plugin)))
+      .map((e) => e.mod.id);
     if (!ids.length) return;
+    const before = ids.map((id) => this.entries.get(id)?.status);
     await this.enqueue(async () => {
       for (const id of ids) {
-        const entry = this.entries.get(id);
-        if (entry) entry.status = "pending";
+        await this.unload(id);
         await this.load(id);
       }
     });
-    if (ids.some((id) => this.entries.get(id)?.status === "loaded")) this.emit("modules");
+    if (ids.some((id, i) => this.entries.get(id)?.status !== before[i])) this.emit("modules");
   }
 
   async setEnabled(id: string, enabled: boolean): Promise<void> {
     if (!this.entries.has(id)) throw new Error(`Unknown module "${id}"`);
     await this.host.setModuleEnabled(id, enabled);
+    await this.reload(id);
+  }
+
+  /** Unload and load a module again, e.g. after a change that decides what it registers. */
+  async reload(id: string): Promise<void> {
+    if (!this.entries.has(id)) throw new Error(`Unknown module "${id}"`);
     await this.enqueue(async () => {
       await this.unload(id);
       if (this.started) await this.load(id);
@@ -165,14 +185,23 @@ export class ModuleRegistry {
   // ───────────────────────── queries ─────────────────────────
 
   list(): ModuleInfo[] {
-    return [...this.entries.values()].map(({ mod, status, error }) => ({
-      id: mod.id,
-      name: mod.name,
-      description: mod.description,
-      status,
-      error,
-      required: !!mod.required,
-    }));
+    return [...this.entries.values()].map(({ mod, status, error, reason }) => {
+      const loaded = mod.plugin && this.host.getPlugin(mod.plugin.id);
+      return {
+        id: mod.id,
+        name: mod.name,
+        description: mod.description,
+        status,
+        error,
+        reason,
+        required: !!mod.required,
+        plugin: mod.plugin && { id: mod.plugin.id, ...(loaded ? { name: loaded.name, version: loaded.version } : {}) },
+      };
+    });
+  }
+
+  has(id: string): boolean {
+    return this.entries.has(id);
   }
 
   getTools(): RegisteredTool[] {
@@ -247,6 +276,7 @@ export class ModuleRegistry {
     if (!entry || entry.status === "loaded") return;
     const { mod } = entry;
     entry.error = undefined;
+    entry.reason = undefined;
 
     if (mod.platforms && !mod.platforms.includes(this.host.platform)) {
       entry.status = "unsupported";
@@ -254,6 +284,12 @@ export class ModuleRegistry {
     }
     if (!this.isEnabled(id)) {
       entry.status = "disabled";
+      return;
+    }
+    const gap = mod.plugin && this.pluginGap(mod.plugin);
+    if (gap) {
+      entry.status = "unavailable";
+      entry.reason = gap.reason;
       return;
     }
     try {
@@ -270,6 +306,16 @@ export class ModuleRegistry {
       entry.error = e instanceof Error ? e.message : String(e);
       this.log.error(`module ${id} failed to load: ${entry.error}`);
     }
+  }
+
+  /** What keeps a module from its plugin, or null when the plugin is loaded and recent enough. */
+  private pluginGap(req: PluginRequirement): { reason?: string } | null {
+    const p = this.host.getPlugin(req.id);
+    if (!p) return {};
+    if (req.minVersion && compareVersions(p.version, req.minVersion) < 0) {
+      return { reason: `Needs ${p.name} ${req.minVersion} or newer; ${p.version || "an older version"} is installed.` };
+    }
+    return null;
   }
 
   private async unload(id: string): Promise<void> {

@@ -14,12 +14,9 @@ Open `C:\Users\abdal\Documents\cw-test-vault` in Obsidian ("Open folder as vault
 ## M0 — Skeleton
 
 - [ ] Plugin enables with no console errors.
-- [ ] Settings → Claude Workspace lists **Hello (example module)**, toggle off.
-- [ ] Toggle Hello on → a "Hello" settings section appears; command palette has "Claude Workspace: Hello: say hello"
-      and it shows a notice.
-- [ ] Change the greeting, run the command again → the notice uses the new greeting.
-- [ ] Toggle Hello off → the settings section and the command disappear (no reload needed).
-- [ ] Disable and re-enable the plugin → the Hello toggle state and greeting persisted.
+- [ ] Settings → Claude Workspace lists the core modules (Obsidian, Markdown notes, Obsidian commands).
+- [ ] Toggle Markdown notes off → its "What it adds" disappears (no reload needed); on → it comes back.
+- [ ] Toggle it off, disable and re-enable the plugin → still off.
 - [ ] Console: `app.plugins.plugins["claude-workspace"].api.registerModule({id:"ext",name:"Ext",onload(c){c.registerCommand({id:"x",name:"Ext: x",callback(){new Notice("ext")}})}})`
       → "Ext" appears in settings and its command works; calling the returned function removes both.
 
@@ -94,3 +91,19 @@ Click **Install** again so the `excalidraw` skill lands in `.claude/skills/`. Cr
 - [ ] With a note focused and the chat focused: "make the selected text bold using the command" → applies to the note.
 - [ ] Editor command while a drawing is focused → `ran: false`, Claude explains instead of retrying.
 - [ ] "Reload Obsidian" → refused (blocked); edit the blocklist in settings and it takes effect immediately.
+
+## Modules by plugin + CLI modules
+
+Needs Obsidian 1.12.2+ with Settings → General → Command line interface on, and Excalidraw 2.29+ in the test vault.
+
+- [ ] Settings → Claude Workspace: "Core modules" (Obsidian, Markdown, Obsidian commands, Obsidian CLI off),
+      then "Excalidraw 2.29.0" with **Excalidraw** and **Excalidraw CLI** side by side, then "Advanced".
+- [ ] "Excalidraw CLI commands" shows "14 of 14 on" and opens a page with a switch per command. Turning `script`
+      off removes `obsidian-excalidraw-plugin_script` (What it adds: 13 tools) and the page stays open.
+- [ ] In Claude Code, `/mcp` reconnect → `obsidian-excalidraw-plugin_status` answers `"ok":true`.
+- [ ] Turn Excalidraw off in Community plugins → within ~2 s both Excalidraw modules leave: the handwritten one
+      shows "Needs its plugin", the CLI one disappears. Turn it back on → both return.
+- [ ] Turn **Obsidian CLI** on → `cli_search` etc. appear; `cli_restart`, `cli_plugin_…`, `cli_delete` don't
+      until switched on in "Obsidian CLI commands"; `eval`/`dev:…` are never listed.
+- [ ] From WSL, without the MCP server: `Obsidian.com vault=cw-test-vault eval code="…registry.list()…"` works
+      for quick checks (Obsidian's CLI goes through Windows interop, not 127.0.0.1).

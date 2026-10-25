@@ -7,6 +7,8 @@ import { connectionSettings } from "../../src/desktop/connection-settings";
 import { voiceSettings } from "../../src/desktop/voice/voice-settings";
 import type { VoiceService } from "../../src/desktop/voice/service";
 import { ModuleRegistry } from "../../src/core/ModuleRegistry";
+import { loadedPlugin } from "../../src/core/plugins";
+import { CliBridge } from "../../src/modules/cli";
 import { WorkspaceSettingTab, mergeData } from "../../src/core/settings";
 import { builtinModules } from "../../src/modules";
 import type { ActiveContext } from "../../src/core/module-api";
@@ -34,7 +36,8 @@ const app: any = {
     on: () => ({}),
   },
   vault: { getFiles: () => files, getAbstractFileByPath: (p: string) => files.find((f) => f.path === p) ?? null },
-  plugins: { plugins: { "obsidian-excalidraw-plugin": {} } },
+  plugins: { plugins: { "obsidian-excalidraw-plugin": { manifest: { name: "Excalidraw", version: "2.29.0" } } } },
+  cli: { handlers: cliHandlers() },
   commands: { commands: { "daily-notes:goto-today": { id: "daily-notes:goto-today", name: "Open today's daily note" } }, executeCommandById: () => true },
 };
 const plugin: any = { app, addCommand() {}, removeCommand() {}, registerView() {}, manifest: { id: "claude-workspace", version: "0.0.1" } };
@@ -57,7 +60,22 @@ const CONTEXT_TEXT = [
   "</obsidian_context>",
 ].join("\n");
 
-const data = mergeData({ modules: { hello: { enabled: false } } });
+/** A few of Obsidian's own CLI commands and Excalidraw 2.29's, as `registerCliHandler` stores them. */
+function cliHandlers(): Map<string, unknown> {
+  const handler = () => "";
+  const ex = (cmd: string, desc: string) => [`obsidian-excalidraw-plugin:${cmd}`, { handler, description: `[Excalidraw]: ${desc}`, flags: null }];
+  return new Map<string, unknown>([
+    ["search", { handler, description: "Search vault for text", flags: { query: { value: "<text>", description: "Search query", required: true } } }],
+    ["daily:read", { handler, description: "Read daily note contents", flags: null }],
+    ["restart", { handler, description: "Restart the app", flags: null }],
+    ["eval", { handler, description: "Execute JavaScript and return result", flags: null }],
+    ...["api", "apply", "create", "export", "help", "list", "open", "read", "result", "schema", "script", "skill", "status"].map((c) =>
+      ex(c, `Native Excalidraw CLI — ${c}`),
+    ),
+  ] as [string, unknown][]);
+}
+
+const data = mergeData({ modules: { "obsidian-excalidraw-plugin": { data: { commands: { "obsidian-excalidraw-plugin:script": false } } } } });
 const registry = new ModuleRegistry({
   app,
   plugin,
@@ -72,8 +90,10 @@ const registry = new ModuleRegistry({
   getActiveContext: async () => ctx,
   getActiveView: () => null,
   notifyContextChanged: () => undefined,
+  getPlugin: (id) => loadedPlugin(app, id),
 });
 for (const m of builtinModules) registry.add(m);
+new CliBridge(app, registry).sync();
 
 async function main(): Promise<void> {
   await registry.start();
@@ -86,6 +106,7 @@ async function main(): Promise<void> {
 
 async function renderSettings(): Promise<void> {
   // settings: everything set up. settings-first-run: Claude Code not found, server down, vault not connected, voice off.
+  // settings-cli-page: the "Excalidraw CLI commands" page.
   const firstRun = scenario === "settings-first-run";
   const frame = document.body.createDiv({ cls: "modal mod-settings cw-preview-settings" });
   const content = frame.createDiv({ cls: "vertical-tab-content-container" });
@@ -127,6 +148,13 @@ async function renderSettings(): Promise<void> {
   content.appendChild(tab.containerEl);
   tab.update(); // what addSettingTab does; it draws too, since the tab is in the page
   await tick();
+  if (scenario === "settings-cli-page") {
+    // Obsidian opens a page by drawing its items in place of the tab's.
+    const page = tab.settingItems.flatMap((g) => ("items" in g ? (g.items ?? []) : [])).find((r) => "type" in r && r.type === "page" && r.name === "Excalidraw CLI commands");
+    tab.settingItems = page && "items" in page ? (page.items ?? []) : [];
+    tab.display();
+    return;
+  }
   // Show the contents of the Excalidraw module card.
   if (!firstRun) tab.containerEl.querySelectorAll<HTMLDetailsElement>(".cw-module-contents")[3]?.setAttribute("open", "");
 }

@@ -7,20 +7,25 @@
  *
  * Keep this file free of MCP SDK / Agent SDK types so modules don't depend on them.
  */
-import type { App, Command, Plugin, SettingDefinition, TFile, View, ViewCreator } from "obsidian";
+import type { App, Command, Plugin, SettingGroupItem, TFile, View, ViewCreator } from "obsidian";
 import type { z } from "zod";
 
 export type Disposer = () => void;
 export type ModulePlatform = "desktop" | "mobile";
 
 export interface WorkspaceModule {
-  /** Lowercase id, also the tool-name prefix: tools must be named `${id}_…`. */
+  /** Lowercase letters, digits and hyphens; also the tool-name prefix: tools must be named `${id}_…`. */
   id: string;
   name: string;
   description?: string;
   /** Where the module can run. Default: both. Desktop = Node APIs available. */
   platforms?: ModulePlatform[];
-  /** E.g. "is the Excalidraw plugin installed". Unavailable modules register nothing. */
+  /**
+   * The Obsidian plugin this module is for. The module loads only while that plugin is enabled (and recent
+   * enough), and the settings tab lists it under the plugin's name. Omit it for modules about Obsidian itself.
+   */
+  plugin?: PluginRequirement;
+  /** Any other condition, e.g. "this Obsidian API exists". Unavailable modules register nothing. */
   isAvailable?(app: App): boolean;
   /** Initial state of the per-module toggle in settings. Default: true. */
   enabledByDefault?: boolean;
@@ -28,6 +33,13 @@ export interface WorkspaceModule {
   required?: boolean;
   onload(ctx: ModuleContext): void | Promise<void>;
   onunload?(): void | Promise<void>;
+}
+
+export interface PluginRequirement {
+  /** The plugin's manifest id, the one Obsidian uses (`.obsidian/plugins/<id>/`). */
+  id: string;
+  /** Lowest version of the plugin the module works with, e.g. "2.29.0". Like a manifest's `minAppVersion`. */
+  minVersion?: string;
 }
 
 export interface ModuleContext {
@@ -143,9 +155,10 @@ export interface SettingsSection {
   title: string;
   /**
    * Rows added to the module's card, as Obsidian setting definitions (rendered and searched by Obsidian).
-   * Prefer `control` rows; their keys are the module's own and are looked up in `values`.
+   * Prefer `control` rows; their keys are the module's own and are looked up in `values`. A `page` row opens
+   * a sub-page with more rows; Obsidian finds pages by name, so include the module's name in it.
    */
-  items: SettingDefinition[];
+  items: SettingGroupItem[];
   values: Record<string, ControlValue>;
 }
 
